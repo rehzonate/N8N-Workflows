@@ -1,0 +1,123 @@
+{
+  "name": "ICANN RDAP Domain Lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "c03a5318-2740-4e03-9638-dff3f18a3c4b",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "url": "=https://rdap.org/domain/{{ $json.domain }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/rdap+json, application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-rdap-lookup/1.0"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "c35f5454-0c1d-4d21-b693-bf3e2f5ece15",
+      "name": "ICANN RDAP Domain Lookup"
+    },
+    {
+      "parameters": {
+        "jsCode": "const events = $json.events ?? [];\nconst expiration = events.find(e => e.eventAction === 'expiration');\n\nreturn [{\n  json: {\n    domain: $json.ldhName ?? $json.unicodeName ?? null,\n    renewalDate: expiration?.eventDate ?? null,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        0
+      ],
+      "id": "33ba784b-aa9d-4482-ba4b-2b184e9e43f9",
+      "name": "Extract Renewal Date"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Company name to domain mapping\nconst companyDomainMapping = {\n  // Client name -> public domain (checked for registration expiry via RDAP)\n  \"Contoso Ltd\": \"contoso.com\",\n  \"Fabrikam Inc\": \"fabrikam.com\",\n  \"Northwind Traders\": \"northwindtraders.com\"\n};\n\n// Function to normalize strings for better matching\nfunction normalizeString(str) {\n  if (!str) return '';\n  return str\n    .toString()\n    .toLowerCase()\n    .trim()\n    .replace(/[^\\w\\s]/g, '') // Remove special characters\n    .replace(/\\s+/g, ' '); // Normalize whitespace\n}\n\n// Create normalized mapping for better matching\nconst normalizedMapping = {};\nObject.keys(companyDomainMapping).forEach(company => {\n  const normalizedKey = normalizeString(company);\n  normalizedMapping[normalizedKey] = companyDomainMapping[company];\n});\n\n// Get input data\nconst inputData = $input.all();\n\n// Process each input item\nfor (const item of inputData) {\n  const data = item.json;\n  \n  // Get the \"Client Name\" field specifically\n  const clientName = data[\"Client Name\"];\n  \n  if (!clientName || clientName.trim() === '') {\n    // No client name provided, return nothing\n    continue;\n  }\n  \n  // Clean and normalize the client name (handle leading/trailing spaces)\n  const cleanClientName = clientName.trim();\n  const normalizedInput = normalizeString(cleanClientName);\n  \n  let domain = null;\n  let matchedCompany = null;\n  \n  // Try exact normalized match first\n  for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n    const normalizedCompany = normalizeString(originalCompany);\n    \n    if (normalizedInput === normalizedCompany) {\n      domain = companyDomain;\n      matchedCompany = originalCompany;\n      break;\n    }\n  }\n  \n  // If no exact match, try partial matching\n  if (!domain) {\n    for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n      const normalizedCompany = normalizeString(originalCompany);\n      \n      // Check if the input contains the company name or vice versa\n      if (normalizedInput.includes(normalizedCompany) || normalizedCompany.includes(normalizedInput)) {\n        domain = companyDomain;\n        matchedCompany = originalCompany;\n        break;\n      }\n    }\n  }\n  \n  // If still no match, try fuzzy matching (removing common words)\n  if (!domain) {\n    const commonWords = ['inc', 'ltd', 'corp', 'corporation', 'company', 'co', 'llc', 'limited', 'plc', 'pc', 'cpa', 'cpas'];\n    let cleanedInput = normalizedInput;\n    \n    // Remove common corporate suffixes\n    commonWords.forEach(word => {\n      cleanedInput = cleanedInput.replace(new RegExp(`\\\\b${word}\\\\b`, 'g'), '').trim();\n    });\n    \n    for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n      const normalizedCompany = normalizeString(originalCompany);\n      let cleanedCompany = normalizedCompany;\n      \n      commonWords.forEach(word => {\n        cleanedCompany = cleanedCompany.replace(new RegExp(`\\\\b${word}\\\\b`, 'g'), '').trim();\n      });\n      \n      if (cleanedInput === cleanedCompany || \n          cleanedInput.includes(cleanedCompany) || \n          cleanedCompany.includes(cleanedInput)) {\n        domain = companyDomain;\n        matchedCompany = originalCompany;\n        break;\n      }\n    }\n  }\n  \n  // Return only the domain if found\n  if (domain) {\n    return [{\n      json: {\n        domain: domain\n      }\n    }];\n  }\n}\n\n// No match found, return empty result\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "79ddc3a1-3352-49b4-b7ac-e3375477a008",
+      "name": "Map Client Name to Domain Name"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Map Client Name to Domain Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ICANN RDAP Domain Lookup": {
+      "main": [
+        [
+          {
+            "node": "Extract Renewal Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Client Name to Domain Name": {
+      "main": [
+        [
+          {
+            "node": "ICANN RDAP Domain Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

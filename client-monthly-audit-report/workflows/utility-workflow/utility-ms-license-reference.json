@@ -1,0 +1,228 @@
+{
+  "name": "Utility - Microsoft License Reference Data",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        -16
+      ],
+      "id": "6e65540a-7371-4285-aa5f-c9adae1719a3",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Microsoft's licensing CSV is comma-delimited with quoted fields (some product\n// names and String_Ids contain commas, so the parser respects quotes). It is one row PER SERVICE PLAN, not one row per product. A single SKU like\n// Microsoft 365 E5 appears as ~50 rows here, all sharing the same\n// Product_Display_Name/String_Id/GUID but differing in Service_Plan_Name/Id.\n// We dedupe below to keep exactly one row per unique product GUID.\n\nconst raw = $input.first().binary?.data\n  ? Buffer.from($input.first().binary.data.data, 'base64').toString('utf-8')\n  : $input.first().json.data; // adjust based on how the HTTP node returns it\n\nfunction parseCsvLine(line) {\n  const fields = [];\n  let cur = '', inQuotes = false;\n  for (let i = 0; i < line.length; i++) {\n    const c = line[i];\n    if (c === '\"') { inQuotes = !inQuotes; continue; }\n    if (c === ',' && !inQuotes) { fields.push(cur); cur = ''; continue; }\n    cur += c;\n  }\n  fields.push(cur);\n  return fields;\n}\n\nconst lines = raw.split(/\\r?\\n/).filter(l => l.trim());\nconst header = parseCsvLine(lines[0]);\nconst productIdx = header.indexOf('Product_Display_Name');\nconst stringIdx = header.indexOf('String_Id');\nconst guidIdx = header.indexOf('GUID');\n\nconst rows = [];\nconst seen = new Set();\nfor (let i = 1; i < lines.length; i++) {\n  const f = parseCsvLine(lines[i]);\n  const skuId = f[guidIdx]?.trim();\n  if (!skuId || seen.has(skuId)) continue; // dedupe by GUID, first occurrence wins\n  seen.add(skuId);\n  rows.push({\n    skuId,\n    stringId: f[stringIdx]?.trim() || '',\n    productName: f[productIdx]?.trim() || '',\n  });\n}\n\nreturn rows.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -16
+      ],
+      "id": "ab057a70-f9b8-4ce2-b80c-0b4d05067d8b",
+      "name": "Cleanup Data"
+    },
+    {
+      "parameters": {
+        "url": "https://download.microsoft.com/download/e/3/e/e3e9faf2-f28b-490a-9ada-c6089a1fc5b0/Product%20names%20and%20service%20plan%20identifiers%20for%20licensing.csv",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        416,
+        -16
+      ],
+      "id": "67003812-eec8-48df-9bb3-2c04f91094a9",
+      "name": "Get Microsoft SKU Spreadsheet"
+    },
+    {
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "ms_license_reference",
+        "columns": {
+          "column": [
+            {
+              "name": "skuId"
+            },
+            {
+              "name": "stringId"
+            },
+            {
+              "name": "productName"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        16,
+        -16
+      ],
+      "id": "54e86285-e281-4919-9ca4-fe3496f72cb3",
+      "name": "Create New Table"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "ms_license_reference",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "skuId",
+              "displayName": "skuId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "stringId",
+              "displayName": "stringId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "productName",
+              "displayName": "productName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "optimizeBulk": true
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        848,
+        -16
+      ],
+      "id": "71bbc35f-1ed9-4187-a6e0-8f5d53f51386",
+      "name": "Insert Table"
+    },
+    {
+      "parameters": {
+        "resource": "table",
+        "operation": "clear",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ms_license_reference",
+          "mode": "name"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        208,
+        -16
+      ],
+      "id": "f6f01719-0cdb-4de5-90ba-b7e2ad082396",
+      "name": "Clear Old Table"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Create New Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Data": {
+      "main": [
+        [
+          {
+            "node": "Insert Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Microsoft SKU Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create New Table": {
+      "main": [
+        [
+          {
+            "node": "Clear Old Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Table": {
+      "main": [
+        []
+      ]
+    },
+    "Clear Old Table": {
+      "main": [
+        [
+          {
+            "node": "Get Microsoft SKU Spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

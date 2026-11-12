@@ -1,0 +1,83 @@
+{
+  "name": "DropSuite Backup Section",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "d0a99bf1-54fd-415f-81a1-dee2b4cf445f",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "url": "https://dropsuite.us/api/users",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpMultipleHeadersAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "5d0321d4-c211-4ee7-8757-24d7cf7ca996",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpMultipleHeadersAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "DropSuite API Headers"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const clientName = String(\n  $('When Executed by Another Workflow').first().json['Client Name'] || ''\n).trim();\n\nif (!clientName) {\n  return [{ json: { error: 'Missing Client Name', matched: false } }];\n}\n\nconst raw = $input.first().json;\nconst orgs = Array.isArray(raw)\n  ? raw\n  : Array.isArray(raw?.data)\n    ? raw.data\n    : $input.all().map((i) => i.json);\n\nconst normalize = (name) =>\n  String(name || '')\n    .toLowerCase()\n    .replace(/\\s*\\[\\d+\\]\\s*$/g, '') // strip \" [6103]\"\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n\nconst target = normalize(clientName);\n\nconst match = orgs.find((org) => {\n  const orgName = normalize(org.organization_name);\n  return orgName === target || orgName.includes(target) || target.includes(orgName);\n});\n\nif (!match) {\n  return [{\n    json: {\n      matched: false,\n      client_name: clientName,\n      error: `No DropSuite org found for \"${clientName}\"`,\n    },\n  }];\n}\n\nreturn [{\n  json: {\n    matched: true,\n    client_name: clientName,\n    organization_name: match.organization_name,\n    organization_id: match.organization_id,\n    admin_email: match.email,\n    active_seats: match.active_seats ?? 0,\n    seats_used: match.seats_used ?? 0,\n    seats_available: match.seats_available ?? 0,\n    required_seats: match.required_seats ?? 0,\n    deactivated_seats: match.deactivated_seats ?? 0,\n    storage_used: match.storage_used ?? 0,\n    free_shared_mailboxes: match.free_shared_mailboxes ?? 0,\n    paid_shared_mailboxes: match.paid_shared_mailboxes ?? 0,\n    archive: match.archive ?? false,\n    suspended: match.flg_suspended ?? false,\n    summary:\n      `${match.organization_name}: ` +\n      `${match.active_seats ?? 0} active seats ` +\n      `(${match.seats_used ?? 0} used / ${match.seats_available ?? 0} available), ` +\n      `${match.deactivated_seats ?? 0} deactivated, ` +\n      `${match.storage_used ?? 0} storage used`,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "a5430387-0d6e-4e7d-98c0-5c17812cbd21",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

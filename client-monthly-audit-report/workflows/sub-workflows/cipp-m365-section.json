@@ -1,0 +1,1041 @@
+{
+  "name": "CIPP M365 Section",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/listusers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "tenantfilter",
+              "value": "={{ $('Convert to Domain Name').item.json.domain }}"
+            },
+            {
+              "name": "includelogondetails",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        -304
+      ],
+      "id": "c3b64d4a-d7ff-4bb5-b663-bdd8f0840a40",
+      "name": "CIPP Get Users",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "include": "selected",
+        "includeFields": "mail, displayName, assignedLicenses, accountEnabled, userType, userPrincipalName",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1024,
+        -304
+      ],
+      "id": "f7e0299c-d863-4cf4-a479-8a78932ae3aa",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Company name to domain mapping\nconst companyDomainMapping = {\n  // Client name -> M365 tenant domain (used as CIPP tenantFilter)\n  \"Contoso Ltd\": \"contoso.onmicrosoft.com\",\n  \"Fabrikam Inc\": \"fabrikam.onmicrosoft.com\",\n  \"Northwind Traders\": \"northwindtraders.onmicrosoft.com\"\n};\n\n// Function to normalize strings for better matching\nfunction normalizeString(str) {\n  if (!str) return '';\n  return str\n    .toString()\n    .toLowerCase()\n    .trim()\n    .replace(/[^\\w\\s]/g, '') // Remove special characters\n    .replace(/\\s+/g, ' '); // Normalize whitespace\n}\n\n// Create normalized mapping for better matching\nconst normalizedMapping = {};\nObject.keys(companyDomainMapping).forEach(company => {\n  const normalizedKey = normalizeString(company);\n  normalizedMapping[normalizedKey] = companyDomainMapping[company];\n});\n\n// Get input data\nconst inputData = $input.all();\n\n// Process each input item\nfor (const item of inputData) {\n  const data = item.json;\n  \n  // Get the \"Client Name\" field specifically\n  const clientName = data[\"Client Name\"];\n  \n  if (!clientName || clientName.trim() === '') {\n    // No client name provided, return nothing\n    continue;\n  }\n  \n  // Clean and normalize the client name (handle leading/trailing spaces)\n  const cleanClientName = clientName.trim();\n  const normalizedInput = normalizeString(cleanClientName);\n  \n  let domain = null;\n  let matchedCompany = null;\n  \n  // Try exact normalized match first\n  for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n    const normalizedCompany = normalizeString(originalCompany);\n    \n    if (normalizedInput === normalizedCompany) {\n      domain = companyDomain;\n      matchedCompany = originalCompany;\n      break;\n    }\n  }\n  \n  // If no exact match, try partial matching\n  if (!domain) {\n    for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n      const normalizedCompany = normalizeString(originalCompany);\n      \n      // Check if the input contains the company name or vice versa\n      if (normalizedInput.includes(normalizedCompany) || normalizedCompany.includes(normalizedInput)) {\n        domain = companyDomain;\n        matchedCompany = originalCompany;\n        break;\n      }\n    }\n  }\n  \n  // If still no match, try fuzzy matching (removing common words)\n  if (!domain) {\n    const commonWords = ['inc', 'ltd', 'corp', 'corporation', 'company', 'co', 'llc', 'limited', 'plc', 'pc', 'cpa', 'cpas'];\n    let cleanedInput = normalizedInput;\n    \n    // Remove common corporate suffixes\n    commonWords.forEach(word => {\n      cleanedInput = cleanedInput.replace(new RegExp(`\\\\b${word}\\\\b`, 'g'), '').trim();\n    });\n    \n    for (const [originalCompany, companyDomain] of Object.entries(companyDomainMapping)) {\n      const normalizedCompany = normalizeString(originalCompany);\n      let cleanedCompany = normalizedCompany;\n      \n      commonWords.forEach(word => {\n        cleanedCompany = cleanedCompany.replace(new RegExp(`\\\\b${word}\\\\b`, 'g'), '').trim();\n      });\n      \n      if (cleanedInput === cleanedCompany || \n          cleanedInput.includes(cleanedCompany) || \n          cleanedCompany.includes(cleanedInput)) {\n        domain = companyDomain;\n        matchedCompany = originalCompany;\n        break;\n      }\n    }\n  }\n  \n  // Return only the domain if found\n  if (domain) {\n    return [{\n      json: {\n        domain: domain\n      }\n    }];\n  }\n}\n\n// No match found, return empty result\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        224
+      ],
+      "id": "09b4fd4d-35f9-4651-bd0d-61ebec5dff65",
+      "name": "Convert to Domain Name"
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/listmfausers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "tenantfilter",
+              "value": "={{ $('Convert to Domain Name').item.json.domain }}"
+            },
+            {
+              "name": "includelogondetails",
+              "value": "true"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        -112
+      ],
+      "id": "5ffa9d27-168f-4455-97c8-2c8eb77ec238",
+      "name": "MFA Data",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        64,
+        224
+      ],
+      "id": "56085e80-dd05-4e8e-99c3-03e8b16401b8",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1584,
+        -224
+      ],
+      "id": "dfbe65b7-db12-486f-8a12-b3ee330636d2",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * n8n Code node — merge MFA + license streams (Run Once for All Items)\n *\n * - Do NOT dedupe by displayName only (same name, two domains → two users).\n * - One canonical join key per identity: \"user:\" + lower(UPN || mail || RowKey@...).\n *   License rows often have mail but no UPN; MFA rows have UPN but no mail — same\n *   address must map to the SAME key (do not use separate \"mail:\" vs \"upn:\" prefixes).\n * - If a node outputs one item whose json is an array of users, rows are flattened.\n */\n\nconst allInputs = $input.all();\n\n/** One object per user row (handles item.json = single row OR array of rows). */\nconst inputRows = [];\nallInputs.forEach((item) => {\n  const data = item.json;\n  if (Array.isArray(data)) {\n    data.forEach((row) => {\n      if (row && typeof row === 'object') inputRows.push(row);\n    });\n  } else if (data && typeof data === 'object') {\n    inputRows.push(data);\n  }\n});\n\nconsole.log('Total input items:', allInputs.length, '— flattened rows:', inputRows.length);\n\nlet mfaData = [];\nlet licenseData = [];\n\ninputRows.forEach((data) => {\n  if (!data || typeof data !== 'object') return;\n\n  // Prefer explicit shapes: license rows usually have assignedLicenses + displayName (camelCase).\n  // MFA rows: MFARegistration / MFAMethods / DisplayName (Pascal) / UPN / ID\n  const hasMfaSignal =\n    Object.prototype.hasOwnProperty.call(data, 'MFARegistration') ||\n    Object.prototype.hasOwnProperty.call(data, 'MFAMethods') ||\n    Object.prototype.hasOwnProperty.call(data, 'PerUser') ||\n    Object.prototype.hasOwnProperty.call(data, 'MFACapable');\n\n  const hasLicenseSignal =\n    Object.prototype.hasOwnProperty.call(data, 'assignedLicenses') ||\n    (Object.prototype.hasOwnProperty.call(data, 'mail') &&\n      (Object.prototype.hasOwnProperty.call(data, 'displayName') ||\n        Object.prototype.hasOwnProperty.call(data, 'DisplayName')));\n\n  // Rows can include BOTH MFA and license fields (single Graph-style item) — send to both lists\n  // so licenseDataMap and mfaDataMap each get a chance to index the same identity.\n  if (hasLicenseSignal) licenseData.push(data);\n  if (hasMfaSignal) mfaData.push(data);\n\n  if (!hasLicenseSignal && !hasMfaSignal) {\n    if (\n      Object.prototype.hasOwnProperty.call(data, 'DisplayName') ||\n      Object.prototype.hasOwnProperty.call(data, 'UPN') ||\n      Object.prototype.hasOwnProperty.call(data, 'userPrincipalName')\n    ) {\n      mfaData.push(data);\n    } else {\n      licenseData.push(data);\n    }\n  }\n});\n\nconsole.log('MFA Data count:', mfaData.length);\nconsole.log('License Data count:', licenseData.length);\nconsole.log('Sample MFA item:', mfaData[0]);\nconsole.log('Sample License item:', licenseData[0]);\n\nfunction hasValidEmail(email) {\n  return email && email !== 'N/A' && email !== 'No data' && String(email).trim() !== '';\n}\n\nfunction normStr(v) {\n  return String(v == null ? '' : v)\n    .trim()\n    .toLowerCase();\n}\n\n/**\n * Single namespace so license (mail-only) and MFA (UPN-only) rows join when they\n * are the same address (case-insensitive). RowKey is often the UPN in table exports.\n */\nfunction stableUserKey(item) {\n  if (!item || typeof item !== 'object') return '';\n  const upnN = normStr(item.userPrincipalName || item.UPN || item.upn);\n  const mailRaw = item.mail || item.Mail || item.email || item.Email;\n  const mailN = hasValidEmail(mailRaw) ? normStr(mailRaw) : '';\n  const rk = item.RowKey;\n  const rkN =\n    typeof rk === 'string' && rk.includes('@') && hasValidEmail(rk.trim())\n      ? normStr(rk)\n      : '';\n\n  const primary = upnN || mailN || rkN;\n  if (primary) return 'user:' + primary;\n\n  const dn = normStr(item.displayName || item.DisplayName);\n  if (dn) return 'nameonly:' + dn;\n\n  const id = item.ID || item.id;\n  if (id != null && String(id).trim()) return 'id:' + String(id).trim();\n\n  return '';\n}\n\nfunction getDataScore(item) {\n  let score = 0;\n  const upn = item.userPrincipalName || item.UPN || item.upn;\n  if (normStr(upn)) score += 15;\n  if (hasValidEmail(item.mail || item.Mail || item.Email)) score += 10;\n  const lic = item.assignedLicenses;\n  if (lic && lic !== 'No Licenses Assigned' && lic !== 'Unassigned') score += 5;\n  if (item.displayName || item.DisplayName) score += 1;\n  return score;\n}\n\nfunction pickBetterDuplicate(existing, incoming) {\n  const a = getDataScore(existing);\n  const b = getDataScore(incoming);\n  if (b > a) return incoming;\n  if (b < a) return existing;\n  const upnB = normStr(incoming.userPrincipalName || incoming.UPN || incoming.upn);\n  if (upnB && !normStr(existing.userPrincipalName || existing.UPN || existing.upn)) return incoming;\n  return existing;\n}\n\nconst licenseDataMap = new Map();\n\nlicenseData.forEach((item) => {\n  const key = stableUserKey(item);\n  if (!key) {\n    console.warn('License row skipped (no UPN/mail/id/displayName):', item);\n    return;\n  }\n  const existing = licenseDataMap.get(key);\n  if (!existing) {\n    licenseDataMap.set(key, item);\n  } else {\n    const chosen = pickBetterDuplicate(existing, item);\n    if (chosen !== existing) {\n      console.log('License duplicate key', key, '— keeping higher-score row');\n    }\n    licenseDataMap.set(key, chosen);\n  }\n});\n\nconst mfaDataMap = new Map();\n\nmfaData.forEach((item) => {\n  const key = stableUserKey(item);\n  if (!key) {\n    const dn = item.DisplayName || item.displayName;\n    if (!dn) {\n      console.warn('MFA row skipped (no identity):', item);\n      return;\n    }\n    const fallbackKey = 'nameonly:' + normStr(dn);\n    const existing = mfaDataMap.get(fallbackKey);\n    if (!existing) mfaDataMap.set(fallbackKey, item);\n    else {\n      const exMail = hasValidEmail(existing.Email || existing.mail || existing.Mail);\n      const nwMail = hasValidEmail(item.Email || item.mail || item.Mail);\n      if (nwMail && !exMail) mfaDataMap.set(fallbackKey, item);\n    }\n    return;\n  }\n\n  const existing = mfaDataMap.get(key);\n  if (!existing) {\n    mfaDataMap.set(key, item);\n  } else {\n    const exMail = hasValidEmail(existing.Email || existing.mail || existing.Mail);\n    const nwMail = hasValidEmail(item.Email || item.mail || item.Mail);\n    if (nwMail && !exMail) mfaDataMap.set(key, item);\n  }\n});\n\nconst allKeys = new Set(licenseDataMap.keys());\n\nconsole.log('Unique identities after merge (canonical user: key):', allKeys.size);\n\nfunction toBoolMfa(v) {\n  if (v === true || v === 'true' || v === 'True' || v === 1 || v === '1') return true;\n  if (v === false || v === 'false' || v === 'False' || v === 0 || v === '0') return false;\n  if (typeof v === 'string') {\n    const s = v.trim().toLowerCase();\n    if (s === 'registered' || s === 'yes' || s === 'enabled') return true;\n    if (s === 'unregistered' || s === 'disabled' || s === 'no' || s === '') return false;\n  }\n  return !!v;\n}\n\nconst combinedResults = [];\n\nallKeys.forEach((key) => {\n  const licenseInfo = licenseDataMap.get(key) || {};\n  const mfaInfo = mfaDataMap.get(key) || {};\n\n  const displayName =\n    licenseInfo.displayName ||\n    licenseInfo.DisplayName ||\n    mfaInfo.DisplayName ||\n    mfaInfo.displayName ||\n    '';\n\n  const userPrincipalName =\n    licenseInfo.userPrincipalName ||\n    licenseInfo.UPN ||\n    licenseInfo.upn ||\n    mfaInfo.userPrincipalName ||\n    mfaInfo.UPN ||\n    mfaInfo.upn ||\n    null;\n\n  let mail =\n    licenseInfo.mail ||\n    mfaInfo.mail ||\n    mfaInfo.Email ||\n    mfaInfo.Mail ||\n    null;\n  if (!mail && userPrincipalName && String(userPrincipalName).includes('@')) {\n    mail = userPrincipalName;\n  }\n\n  const assignedLicenses =\n    licenseInfo.assignedLicenses != null ? licenseInfo.assignedLicenses : null;\n\n  let mfaMethods = mfaInfo.MFAMethods;\n  if (mfaMethods == null) mfaMethods = [];\n  if (typeof mfaMethods === 'string') mfaMethods = [mfaMethods];\n\n  const combinedItem = {\n    displayName,\n    userPrincipalName,\n    mail,\n    assignedLicenses,\n    MFAEnabled: toBoolMfa(mfaInfo.MFARegistration),\n    MFAMethods: mfaMethods,\n  };\n\n  combinedResults.push(combinedItem);\n});\n\ncombinedResults.sort((a, b) =>\n  String(a.displayName || '')\n    .toLowerCase()\n    .localeCompare(String(b.displayName || '').toLowerCase())\n);\n\nreturn [\n  {\n    json: {\n      results: combinedResults,\n      totalUsers: combinedResults.length,\n      processedAt: new Date().toISOString(),\n      debug: {\n        mfaDataCount: mfaData.length,\n        licenseDataCount: licenseData.length,\n        totalInputs: allInputs.length,\n        flattenedRowCount: inputRows.length,\n        uniqueUsersAfterDedup: combinedResults.length,\n        sampleMfaFields: mfaData[0] ? Object.keys(mfaData[0]) : [],\n        sampleLicenseFields: licenseData[0] ? Object.keys(licenseData[0]) : [],\n      },\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -208
+      ],
+      "id": "6981b6a7-dc2a-4a32-adf6-9c87b10e96ba",
+      "name": "Clean Output"
+    },
+    {
+      "parameters": {
+        "numberInputs": 7
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1920,
+        128
+      ],
+      "id": "5d8edb27-a700-418b-8f6f-ebd0c4c08116",
+      "name": "Merge1",
+      "executeOnce": true,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListGraphRequest?tenantFilter={{ $('Convert to Domain Name').item.json.domain }}&Endpoint=security/secureScores%3F%24select%3DcurrentScore%2CmaxScore%26%24orderby%3DcreatedDateTime%20desc%26%24top%3D1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        384
+      ],
+      "id": "f3cd9e05-c734-4b7d-b6ec-5221ac45bb35",
+      "name": "CIPP Secure Score",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Outputs one item with all incoming items under json.items\nconst combined = items.map(i => i.json);\nreturn [{ json: { items: combined } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        224
+      ],
+      "id": "6f98539b-8829-44e4-9c5f-97df7d78afc4",
+      "name": "Single Json Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: $input.first().json.Results (Graph Secure Score response)\n// Output: one summary item only\n\nconst payload = $input.first()?.json ?? {};\nconst results = Array.isArray(payload.Results) ? payload.Results : [];\n\nif (results.length === 0) {\n  return [{ json: { summary: true, message: 'Results array missing in input' } }];\n}\n\nconst latest = results.reduce((acc, r) => {\n  const a = acc?.createdDateTime ? new Date(acc.createdDateTime).getTime() : -Infinity;\n  const b = r?.createdDateTime ? new Date(r.createdDateTime).getTime() : -Infinity;\n  return b > a ? r : acc;\n}, results[0]);\n\nconst currentScore = Number(latest?.currentScore) || 0;\nconst maxScore = Number(latest?.maxScore) || 0;\nconst tenantScorePercent = maxScore > 0\n  ? Math.round((currentScore / maxScore) * 10000) / 100\n  : null;\n\nconst comparatives = Array.isArray(latest?.averageComparativeScores)\n  ? latest.averageComparativeScores\n  : [];\nconst byBasis = (basis) =>\n  comparatives.find((c) => (c?.basis || '').toLowerCase() === basis);\nconst comp = byBasis('totalseats') || byBasis('alltenants') || comparatives[0] || null;\n\nlet comparativePercent = null;\nlet comparativeBasis = null;\nlet comparativeSeatRange = null;\n\nif (comp) {\n  const sumScore =\n    (Number(comp.appsScore) || 0) +\n    (Number(comp.dataScore) || 0) +\n    (Number(comp.deviceScore) || 0) +\n    (Number(comp.identityScore) || 0) +\n    (Number(comp.infrastructureScore) || 0);\n\n  const sumMax =\n    (Number(comp.appsScoreMax) || 0) +\n    (Number(comp.dataScoreMax) || 0) +\n    (Number(comp.deviceScoreMax) || 0) +\n    (Number(comp.identityScoreMax) || 0) +\n    (Number(comp.infrastructureScoreMax) || 0);\n\n  comparativePercent = sumMax > 0\n    ? Math.round((sumScore / sumMax) * 10000) / 100\n    : null;\n\n  comparativeBasis = comp.basis || null;\n\n  if (comp.SeatSizeRangeLowerValue || comp.SeatSizeRangeUpperValue) {\n    comparativeSeatRange = {\n      lower: comp.SeatSizeRangeLowerValue || null,\n      upper: comp.SeatSizeRangeUpperValue || null,\n    };\n  }\n}\n\nreturn [{\n  json: {\n    summary: true,\n    tenantCurrentScore: currentScore,\n    tenantMaxScore: maxScore,\n    tenantScorePercent,\n    comparativeBasis,\n    comparativeSeatRange,\n    comparativePercent,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        384
+      ],
+      "id": "eee96ed8-7858-422a-9bf9-def80d141563",
+      "name": "Retrieve Scores",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListSharepointQuota?tenantFilter={{ $('Convert to Domain Name').item.json.domain }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        800,
+        544
+      ],
+      "id": "dd23fc00-0975-44e3-9d24-54901b7f30ea",
+      "name": "Get Sharepoint Storage",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListGraphRequest?tenantFilter={{ $('Convert to Domain Name').item.json.domain }}&Endpoint=deviceManagement%2FmanagedDevices%3F%24select%3DdeviceName%2CwindowsProtectionState%2CosVersion%2CcomplianceState",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        800,
+        704
+      ],
+      "id": "09ecc86a-6a35-450f-adb0-ab87ba20564b",
+      "name": "Protected endpoint",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input data\nconst inputData = $input.first().json;\n\n// Handle both array wrapper and direct object\nconst items = Array.isArray(inputData) ? inputData : [inputData];\n\n// Format date to DD/MM/YYYY\nconst formatDate = (dateStr) => {\n  if (!dateStr || dateStr.startsWith(\"0001\")) return null;\n  const d = new Date(dateStr);\n  if (isNaN(d)) return null;\n  return `${String(d.getUTCDate()).padStart(2, \"0\")}/${String(d.getUTCMonth() + 1).padStart(2, \"0\")}/${d.getUTCFullYear()}`;\n};\n\nconst consolidatedDevices = [];\n\nfor (const item of items) {\n  const results = item?.Results ?? [];\n\n  for (const device of results) {\n    // Convert bytes to GB\n    const toGB = (bytes) =>\n      bytes > 0 ? parseFloat((bytes / 1073741824).toFixed(2)) : null;\n\n    const totalGB = toGB(device.totalStorageSpaceInBytes);\n    const freeGB = toGB(device.freeStorageSpaceInBytes);\n\n    consolidatedDevices.push({\n      // --- Identity ---\n      deviceName: device.deviceName ?? null,\n      serialNumber: device.serialNumber ?? null,\n\n      // --- User ---\n      userDisplayName: device.userDisplayName ?? null,\n      userPrincipalName: device.userPrincipalName ?? null,\n\n      // --- Device Info ---\n      manufacturer: device.manufacturer ?? null,\n      model: device.model ?? null,\n      joinType: device.joinType ?? null,\n\n      // --- Storage ---\n      totalStorageGB: totalGB,\n      freeStorageGB: freeGB,\n      usedStorageGB:\n        totalGB !== null && freeGB !== null\n          ? parseFloat((totalGB - freeGB).toFixed(2))\n          : null,\n      storageUsedPercent:\n        device.totalStorageSpaceInBytes > 0\n          ? parseFloat(\n              (\n                ((device.totalStorageSpaceInBytes - device.freeStorageSpaceInBytes) /\n                  device.totalStorageSpaceInBytes) *\n                100\n              ).toFixed(1)\n            )\n          : null,\n\n      // --- Compliance & Security ---\n      complianceState: device.complianceState ?? null,\n      isEncrypted: device.isEncrypted ?? null,\n      managementState: device.managementState ?? null,\n      managementAgent: device.managementAgent ?? null,\n      ownerType: device.ownerType ?? null,\n\n      // --- Dates ---\n      enrolledDate: formatDate(device.enrolledDateTime),\n      lastSyncDate: formatDate(device.lastSyncDateTime),\n    });\n  }\n}\n\nreturn consolidatedDevices.map((device) => ({ json: device }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        704
+      ],
+      "id": "568d7155-99fd-419b-8b9a-5651ee31940f",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.first().json;\nconst items = Array.isArray(inputData) ? inputData : [inputData];\n\n// Convert MB to the most readable unit\nconst formatStorage = (mb) => {\n  if (!mb || isNaN(mb)) return null;\n  const num = parseFloat(mb);\n  if (num >= 1048576) return `${(num / 1048576).toFixed(2)} TB`;\n  if (num >= 1024) return `${(num / 1024).toFixed(2)} GB`;\n  return `${num.toFixed(0)} MB`;\n};\n\nconst results = [];\n\nfor (const item of items) {\n  const usedMB = parseFloat(item.GeoUsedStorageMB);\n  const totalMB = parseFloat(item.TenantStorageMB);\n  const freeMB = totalMB - usedMB;\n\n  results.push({\n    // --- Storage ---\n    sharepointTotalStorage: formatStorage(totalMB),\n    sharepointUsedStorage: formatStorage(usedMB),\n    sharepointFreeStorage: formatStorage(freeMB),\n    sharepointUsedPercent: `${item.Percentage}%`,\n    sharepointStorageSummary: `${formatStorage(usedMB)} used of ${formatStorage(totalMB)}`,\n\n    // --- Raw (for calculations downstream) ---\n    sharepointTotalStorageMB: totalMB,\n    sharepointUsedStorageMB: usedMB,\n    sharepointFreeStorageMB: parseFloat(freeMB.toFixed(2)),\n  });\n}\n\nreturn results.map((item) => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        544
+      ],
+      "id": "1a9593ab-0c59-4bc0-b3fb-95755f5be2d5",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "317ca0f5-fb6f-4783-8cd3-51ce95bd1399",
+              "name": "sharepointStorageSummary",
+              "value": "={{ $json.sharepointStorageSummary }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1248,
+        544
+      ],
+      "id": "74f4cf91-8bbd-47d7-a790-2d79bef45bad",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListGraphRequest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "tenantfilter",
+              "value": "={{ $('Convert to Domain Name').item.json.domain }}"
+            },
+            {
+              "name": "endpoint",
+              "value": "roleManagement/directory/roleAssignments"
+            },
+            {
+              "name": "$expand",
+              "value": "principal"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        800,
+        64
+      ],
+      "id": "53b6941a-bf9c-4ca1-b84e-d3ca61677841",
+      "name": "Get Admins",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListMailQuarantine?tenantFilter={{ $('Convert to Domain Name').item.json.domain }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        800,
+        896
+      ],
+      "id": "7a358d05-3ad4-45b6-a256-546f4f7cf012",
+      "name": "Last 30 days items older then that expire",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputItems = $input.all();\n\n// Supports standard node output, arrays, and webhook bodies.\nconst containers = inputItems.flatMap((item) => {\n  const value = item.json?.body ?? item.json;\n  return Array.isArray(value) ? value : [value];\n});\n\nconst emails = containers.flatMap((container) => {\n  if (Array.isArray(container?.Results)) return container.Results;\n  if (container?.SenderAddress) return [container];\n  return [];\n});\n\nconst totalBlockedByType = {};\nconst inboxTotals = {};\n\nfor (const email of emails) {\n  const type = email.Type || 'Unknown';\n\n  totalBlockedByType[type] =\n    (totalBlockedByType[type] || 0) + 1;\n\n  const recipients = Array.isArray(email.RecipientAddress)\n    ? email.RecipientAddress\n    : email.RecipientAddress\n      ? [email.RecipientAddress]\n      : [];\n\n  // Count each recipient once per email.\n  for (const recipient of new Set(recipients)) {\n    const address = String(recipient).trim().toLowerCase();\n    if (!address) continue;\n\n    inboxTotals[address] ??= {\n      email: address,\n      totalBlocked: 0,\n      blockedByType: {},\n    };\n\n    inboxTotals[address].totalBlocked += 1;\n    inboxTotals[address].blockedByType[type] =\n      (inboxTotals[address].blockedByType[type] || 0) + 1;\n  }\n}\n\nconst top5Inboxes = Object.values(inboxTotals)\n  .sort(\n    (a, b) =>\n      b.totalBlocked - a.totalBlocked ||\n      a.email.localeCompare(b.email)\n  )\n  .slice(0, 5);\n\nreturn [{\n  json: {\n    top5Inboxes,\n    totalBlockedByType,\n    grandTotalBlocked: emails.length,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        896
+      ],
+      "id": "71453b0b-a7c0-48d6-b33f-9e02b8c274b9",
+      "name": "Summary of Email stats"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge all incoming items into a single array under one item\nconst items = $input.all();\n\n// Option 1: Wrap everything into one item with a \"data\" array\nreturn [{\n  json: {\n    merged: true,\n    count: items.length,\n    data: items.map(item => item.json)\n  }\n}];\n\n// Option 2 (alternative): Flatten all items' fields into one object\n// const merged = {};\n// for (const item of items) {\n//   Object.assign(merged, item.json);\n// }\n// return [{ json: merged }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        144
+      ],
+      "id": "2a134e2b-8c64-42b9-819d-c365ccf6c30b",
+      "name": "unified output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Qualifies for the Unlicensed Users with Sign-in Enabled section:\n// - no assigned licenses (unlicensed)\n// - accountEnabled === true (sign-in enabled)\n// - userType !== 'Guest' (excludes external users)\n// - displayName does not contain \"break glass\" (excludes emergency access accounts)\nfunction qualifiesAsUnlicensedEnabled(user) {\n  const isUnlicensed =\n    !user.assignedLicenses ||\n    !Array.isArray(user.assignedLicenses) ||\n    user.assignedLicenses.length === 0;\n\n  const isSignInEnabled = user.accountEnabled === true;\n\n  const isNotGuest = user.userType !== 'Guest';\n\n  const displayName = (user.displayName || '').toLowerCase();\n  const isNotBreakGlass = !displayName.includes('break glass');\n\n  return isUnlicensed && isSignInEnabled && isNotGuest && isNotBreakGlass;\n}\n\n// Get the input data\nconst inputData = $input.all();\n\n// Array to store all processed results\nconst allProcessedData = [];\n\n// Loop through all input items\nfor (let i = 0; i < inputData.length; i++) {\n  const currentItem = inputData[i].json;\n\n  if (Array.isArray(currentItem)) {\n    const processedUsers = currentItem\n      .filter(qualifiesAsUnlicensedEnabled)\n      .map(user => ({\n        displayName: user.displayName,\n        userPrincipalName: user.userPrincipalName\n      }));\n\n    allProcessedData.push(...processedUsers);\n  } else {\n    if (qualifiesAsUnlicensedEnabled(currentItem)) {\n      allProcessedData.push({\n        displayName: currentItem.displayName,\n        userPrincipalName: currentItem.userPrincipalName\n      });\n    }\n  }\n}\n// Wrap as a single tagged item so the report generator can identify this\n// list distinctly from the general M365 user roster it also receives.\nreturn [{\n  json: {\n    type: \"unlicensed_signin_enabled_users\",\n    users: allProcessedData\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        -128
+      ],
+      "id": "7012e7f0-ef08-43b9-905f-bb4014b60e32",
+      "name": "Pull Unlicensed and Enabled Users"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Define the top 100+ most common license mappings including the new SKU IDs\nconst licenseMapping = {\n  // Microsoft 365 Business Plans\n  \"cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46\": \"Microsoft 365 Business Premium\",\n  \"f245ecc8-75af-4f8e-b61f-27d8114de5f3\": \"Microsoft 365 Business Standard\", \n  \"ac5cef5d-921b-4f97-9ef3-c99076e5470f\": \"Microsoft 365 Business Basic\",\n  \"d17b27af-3f49-4822-99f9-56a661538792\": \"Microsoft 365 Apps for business\",\n  \n  // Microsoft 365 Enterprise Plans\n  \"05e9a617-0261-4cee-bb44-138d3ef5d965\": \"Microsoft 365 E3\",\n  \"06ebc4ee-1bb5-47dd-8120-11324bc54e06\": \"Microsoft 365 E5\",\n  \"cdd28e44-67e3-425e-be4c-737fab2899d3\": \"Microsoft 365 Apps for enterprise\",\n  \n  // Microsoft 365 Frontline Plans\n  \"66b55226-6b4f-492c-910c-a3b7a3c9d993\": \"Microsoft 365 F1\",\n  \"e3dd2eee-9d84-4cf6-a2e8-b5ddc2a93bb6\": \"Microsoft 365 F3\",\n  \"a4585165-0533-458a-97e3-c400570268c4\": \"Microsoft 365 F5\",\n  \n  // Office 365 Plans\n  \"6fd2c87f-b296-42f0-b197-1e91e994b900\": \"Office 365 E3\",\n  \"c42b9cae-ea4f-4ab7-9717-81576235ccac\": \"Office 365 E5\",\n  \"18181a46-0d4e-45cd-891e-60aabd171b4e\": \"Office 365 E1\",\n  \"c7df2760-2c81-4ef7-b578-5b5392b571df\": \"Office 365 E5\",\n  \"4b585984-651b-448a-9e53-3b10f069cf7f\": \"Office 365 F1\",\n  \"21502a13-c8dc-4744-be9c-177fd9d2eafc\": \"Microsoft 365 Business Basic (no Teams)\",\n  \n  // Microsoft Entra ID (Azure AD) Plans\n  \"078d2b04-f1bd-4111-bbd4-b4b1b354cef4\": \"Microsoft Entra ID P1\",\n  \"84a661c4-e949-4bd2-a560-ed7766fcaf2b\": \"Microsoft Entra ID P2\",\n  \"2b9c8e7c-319c-43a2-a2a0-48c5c6161de7\": \"Microsoft Entra Basic\",\n  \"30fc3c36-5a95-4956-ba57-c09c2a600bb9\": \"Microsoft Entra ID P1 for faculty\",\n  \n  // **NEW SKU IDs ADDED**\n  \"46102f44-d912-47e7-b0ca-1bd7b70ada3b\": \"Dynamics 365 Project Operations\",\n  \"53818b1b-4a27-454b-8896-0dba576410e6\": \"Planner and Project Plan 3\",\n  \"f8a1db68-be16-40ed-86d5-cb42ce701560\": \"Power BI Pro\",\n  \"5b631642-bd26-49fe-bd20-1daaa972ef80\": \"Microsoft Power Apps for Developer\",\n  \n  // Enterprise Mobility + Security\n  \"efccb6f7-5641-4e0e-bd10-b4976e1bf68e\": \"Enterprise Mobility + Security E3\",\n  \"b05e124f-c7cc-45a0-a6aa-8cf78c946968\": \"Enterprise Mobility + Security E5\",\n  \"4cde982a-ede4-4409-9ae6-b003453c8ea6\": \"Enterprise Mobility + Security A3\",\n  \"5e62787c-c316-451f-b873-1d05acd4d12c\": \"Enterprise Mobility + Security A5\",\n  \n  // Exchange Online Plans\n  \"4b9405b0-7788-4568-add1-99614e613b69\": \"Exchange Online (Plan 1)\",\n  \"19ec0d23-8335-4cbd-94ac-6050e30712fa\": \"Exchange Online (Plan 2)\",\n  \"ee02fd1b-340e-4a4b-b355-4a514e4c8943\": \"Exchange Online Essentials\",\n  \"7fc0182e-d107-4556-8329-7caaa511197b\": \"Exchange Online Protection\",\n  \n  // SharePoint Plans\n  \"1fc08a02-8b3d-43b9-831e-f76859e04e1a\": \"SharePoint Online (Plan 1)\",\n  \"a9732ec9-17d9-494c-a51c-d6b45b384dcb\": \"SharePoint Online (Plan 2)\",\n  \n  // Microsoft Teams Plans\n  \"57ff2da0-773e-42df-b2af-ffb7a2317929\": \"Microsoft Teams Essentials\",\n  \"710779e8-3d4a-4c88-adb9-386c958d1fdf\": \"Microsoft Teams Phone Standard\",\n  \"440eaaa8-b3e0-484b-a8be-62870b9ba70a\": \"Microsoft Teams Phone with Calling Plan\",\n  \"e0dfc8b9-9531-4ec8-94b4-9fec23b05fc8\": \"Microsoft Teams Exploratory\",\n  \n  // Power Platform Plans\n  \"f30db892-07e9-47e9-837c-80727f46fd3d\": \"Microsoft Power Automate Free\",\n  \"6403d40f-027f-4830-8e07-a67745fbb6a3\": \"Power Automate per user plan\",\n  \"f2a4103a-a05c-4d97-ade4-6e99e0ba7d5f\": \"Power BI Pro\",\n  \"a403ebcc-fae0-4ca2-8c8c-7a907fd6c235\": \"Microsoft Fabric Free\",\n  \n  // Dynamics 365 Plans\n  \"ea126fc5-a19e-42e2-a731-da9d437bffcf\": \"Dynamics 365 Customer Service Professional\",\n  \"749742bf-0d37-4158-a120-33567104deeb\": \"Dynamics 365 Sales Professional\",\n  \"2ca2701d-84a8-4201-8101-bbc8bef7dc48\": \"Dynamics 365 Business Central Essentials\",\n  \"8e7a3d30-d97d-43ab-837c-d7701cef83dc\": \"Dynamics 365 Field Service\",\n  \"f991cecc-3f91-4cd0-a9a8-bf1c8167e029\": \"Dynamics 365 Business Central Premium\",\n  // Security and Compliance Add-ons\n  \"26ad4b5c-b686-462e-84b9-d7c22b46837f\": \"Microsoft Defender for Office 365 (Plan 1)\",\n  \"e52c0c0c-71f6-45fd-8ca1-7d3c89e8b18e\": \"Microsoft Defender for Office 365 (Plan 2)\",\n  \"906af65a-2970-46d5-9b58-4e9aa50f0657\": \"Microsoft Defender for Business\",\n  \"111046dd-295b-4d6d-9724-d52ac90bd1f2\": \"Microsoft Defender for Endpoint P1\",\n  \"e2dcbc96-a799-469e-a4f0-9c92b8c3acb4\": \"Microsoft Defender for Endpoint P2\",\n  \n  // Windows Plans\n  \"cb10e6cd-9da4-4992-867b-67546b1db821\": \"Windows 10/11 Enterprise E3\",\n  \"488ba24a-39a9-4473-8ee5-19291e71b002\": \"Windows 10/11 Enterprise E5\",\n  \"1e7e1070-8ccb-4aca-b470-d7cb538cb07e\": \"Windows 365 Business\",\n  \"2d1d344e-d10c-41bb-953b-b3a47521dca0\": \"Windows 365 Enterprise\",\n  \n  // Copilot Plans\n  \"639dec6b-bb19-468b-871c-c5c441c4b0cb\": \"Copilot for Microsoft 365\",\n  \"9c0587fd-1b72-4968-ba07-8a11b0e70bbe\": \"Microsoft Copilot Studio\",\n  \n  // Developer Plans\n  \"e25c23ac-e3a9-4324-a981-ba2b29de7e21\": \"Visual Studio Professional Subscription\",\n  \"17878847-3d33-421d-90be-638a6cb4b6ac\": \"Visual Studio Enterprise Subscription\",\n  \"126e314e-7156-4312-a42f-1ba1b10bcf04\": \"GitHub Enterprise Cloud\",\n  \n  // Education Plans\n  \"e578b273-6db4-4691-bba0-8d691f4da603\": \"Microsoft 365 A3 for faculty\",\n  \"98b6e773-24d4-4c0d-a968-6e787a1f8204\": \"Microsoft Power Apps for Developer\",\n  \"4b590615-0888-425a-a965-b3bf7789848d\": \"Microsoft 365 A5 for faculty\",\n  \"ee656612-49fa-43e5-b67e-cb1fdf7699df\": \"Microsoft 365 A5 for students\",\n  \n  // Additional Office 365 variants\n  \"d59682f3-3e3a-4347-a5ca-a21910a07b98\": \"Office 365 Business Essentials\",\n  \"cfc966b3-fb4a-456b-9e37-be1209b29edc\": \"Office 365 ProPlus\",\n  \"c2273bd0-dff7-4215-9ef5-2c7bcfb06425\": \"Apps for enterprise\",\n  \n  // Microsoft Viva Plans\n  \"b66e9e55-08e8-4ad8-8a9d-5fb44e79a8a3\": \"Microsoft Viva Suite\",\n  \"61902246-d7cb-453e-85cd-53ee28eec138\": \"Viva Insights\",\n  \"87dd2714-36ca-4454-9eae-8781b0db0ff9\": \"Viva Learning\",\n  \"4a51bf65-409c-4a91-b845-1121b571cc9d\": \"Viva Topics\",\n  \n  // Project and Visio Plans\n  \"09015f9f-377f-4538-bbb5-f75ceb09358a\": \"Project Online Essentials\",\n  \"776df282-9fc0-4862-99e2-70e561b9909e\": \"Project Online Professional\",\n  \"09b28a35-df34-4c38-a4b9-b8bb74ab8cc1\": \"Project Online Premium\",\n  \"c5928f49-12ba-48f7-ada3-0d743a3601d5\": \"Visio Online Plan 1\",\n  \"663a804f-1c30-4ff0-9915-9db84f0d1cea\": \"Visio Online Plan 2\",\n  \n  // Audio Conferencing\n  \"0c266dff-15dd-4b49-8397-2bb16070ed52\": \"Microsoft 365 Audio Conferencing\",\n  \"2f442157-a11c-46b9-ae5b-6e39ff4e5849\": \"Audio Conferencing with dial-out to USA/CAN\",\n  \n  // Phone System and Calling Plans\n  \"4828c8ec-dc2e-4779-b502-87ac9ce28ab7\": \"Microsoft Teams Phone Standard\",\n  \"4ed7d5e1-8e10-4872-8528-b8b29f4c7c2f\": \"Domestic Calling Plan\",\n  \"e4c6a4b6-2040-4407-bea9-d11bf226b8f6\": \"International Calling Plan\",\n  \n  // Yammer\n  \"7547a3fe-08ee-4ccb-b430-5077c5041653\": \"Yammer Enterprise\",\n  \n  // Microsoft Stream\n  \"1f2f344a-700d-42c9-9427-5cea1d5d7ba6\": \"Microsoft Stream\",\n  \"6c6042f5-6f01-4d67-b8c1-eb99d36eed3e\": \"Microsoft Stream Plan 2\",\n  \n  // OneDrive\n  \"ed01faf2-1d88-4947-ae91-45ca18703a96\": \"OneDrive for Business (Plan 1)\",\n  \"726a0894-2c77-4d65-99da-9775ef05aad1\": \"OneDrive for Business (Plan 2)\",\n  \n  // Intune\n  \"e6025b08-2fa5-4313-bd0a-7e5ffca32958\": \"Microsoft Intune Plan 1\",\n  \"248f5528-b2cb-4709-a9ac-8eca6049f8a6\": \"Microsoft Intune for Education\",\n  \n  // Information Protection\n  \"c52ea49f-fe5d-4e95-93ba-1de91d380f89\": \"Azure Information Protection Premium P1\",\n  \"ea5ec9c2-8722-4015-9de4-db15c811a8db\": \"Azure Information Protection Premium P2\",\n  \n  // Microsoft 365 Government Plans\n  \"ca9d1dd9-dfe9-4fef-b97c-9bc1ea3c3658\": \"Microsoft 365 GCC\",\n  \"8a256a2b-b617-496d-b51b-e76466e88db0\": \"Microsoft 365 GCC High\",\n  \"b8f9c312-dc49-4f1e-8d96-d0121608e3a8\": \"Microsoft 365 DoD\",\n  \n  // Additional Business Plans\n  \"3b555118-da6a-4418-894f-7df1e2096870\": \"Microsoft 365 Business Basic\",\n  \"dab7782a-93b1-4074-8bb1-0e61318bea51\": \"Microsoft 365 Business Standard\",\n  \n  // Azure Plans\n  \"2f707c7c-2433-49a5-a437-9ca7cf40d3eb\": \"Azure Active Directory Premium P1\",\n  \"eec0eb4f-6444-4f95-aba0-50c24d67f998\": \"Azure Active Directory Premium P2\",\n  \n  // Compliance and Security Add-ons\n  \"41fcdd7d-4733-4863-9cf4-c65b83ce2df4\": \"Microsoft 365 E5 Compliance\",\n  \"26124093-3d78-432b-b5dc-48bf992543d5\": \"Microsoft 365 E5 Security\",\n  \"db684ac5-c0e7-4f92-8284-ef9ebde75d33\": \"Advanced eDiscovery\",\n  \"9f431833-0334-42de-a7dc-70aa40db46db\": \"Customer Lockbox\",\n  \n  // SharePoint Advanced Plans\n  \"21d2b5e4-1c72-4bb6-8a90-265da86f0e88\": \"SharePoint Syntex\",\n  \"2bdbaf8f-738f-4ac7-9234-3c3ee2ce7d0f\": \"SharePoint Syntex - SPO type\",\n  \n  // Additional Microsoft Teams Plans\n  \"e43b5b99-8dfb-405f-9987-dc307f34bcbd\": \"Microsoft Teams Calling Plan\"\n};\n\n// --- License name resolution: three-tier fallback, in priority order ---\n// Tier 1 (above): hand-curated, instant, for the SKUs we see most often.\n// Tier 2 (csvReferenceMap): Microsoft's full official product catalog, loaded\n//         into the ms_license_reference Data Table by the separate annual\n//         \"License Reference Data - CSV Loader\" workflow.\n// Tier 3 (tenantSkuMap): live /subscribedSkus call for this tenant. Not a\n//         friendly name (Microsoft's internal String ID, e.g. \"SPB\"), but\n//         guarantees we never fall through to \"Unknown License\".\n\nconst subscribedSkusRaw = $('Get Subscribed SKUs').first()?.json;\nconst skuResults = Array.isArray(subscribedSkusRaw?.Results) ? subscribedSkusRaw.Results : [];\nconst tenantSkuMap = {};\nfor (const sku of skuResults) {\n  if (sku?.skuId) tenantSkuMap[sku.skuId] = sku.skuPartNumber || null;\n}\n\nconst csvRefRows = $('Get MS License Reference').all().map(i => i.json);\nconst csvReferenceMap = {};\nfor (const row of csvRefRows) {\n  if (row?.skuId) csvReferenceMap[row.skuId] = row.productName || null;\n}\n\n// Function to convert SKU ID to product name\nfunction convertSkuToProductName(skuId) {\n  if (!skuId || skuId.trim() === '') {\n    return \"Unassigned\";\n  }\n  if (licenseMapping[skuId]) return licenseMapping[skuId];\n  if (csvReferenceMap[skuId]) return csvReferenceMap[skuId];\n  if (tenantSkuMap[skuId]) return tenantSkuMap[skuId];\n  return `Unknown License (${skuId})`;\n}\n\n// NEW: qualifies for the Licensed Users section\n// - must have at least one assigned license\n// - must not be an external/guest account\n// - accountEnabled is intentionally NOT checked here, disabled but licensed users still show\nfunction qualifiesAsLicensed(user) {\n  const isLicensed =\n    !!user.assignedLicenses &&\n    Array.isArray(user.assignedLicenses) &&\n    user.assignedLicenses.length > 0;\n\n  const isNotGuest = user.userType !== 'Guest';\n\n  return isLicensed && isNotGuest;\n}\n\n// Get the input data\nconst inputData = $input.all();\n\n// Array to store all processed results\nconst allProcessedData = [];\n\n// Loop through all input items\nfor (let i = 0; i < inputData.length; i++) {\n  const currentItem = inputData[i].json;\n\n  if (Array.isArray(currentItem)) {\n    const processedUsers = currentItem\n      .filter(qualifiesAsLicensed)   // drop unlicensed and guest users here\n      .map(user => {\n        const processedUser = {\n          displayName: user.displayName,\n          mail: user.mail\n        };\n\n        // Every remaining user here is confirmed licensed, so this\n        // will always take the \"has licenses\" branch, kept for consistency\n        // with your existing formatting logic.\n        if (user.assignedLicenses && Array.isArray(user.assignedLicenses) && user.assignedLicenses.length > 0) {\n          const productNames = user.assignedLicenses.map(license =>\n            convertSkuToProductName(license.skuId)\n          );\n          processedUser.assignedLicenses = productNames.join(', ');\n        } else {\n          processedUser.assignedLicenses = \"Unassigned\";\n        }\n\n        return processedUser;\n      });\n\n    allProcessedData.push(...processedUsers);\n  } else {\n    if (qualifiesAsLicensed(currentItem)) {\n      const processedUser = {\n        displayName: currentItem.displayName,\n        mail: currentItem.mail\n      };\n\n      if (currentItem.assignedLicenses && Array.isArray(currentItem.assignedLicenses) && currentItem.assignedLicenses.length > 0) {\n        const productNames = currentItem.assignedLicenses.map(license =>\n          convertSkuToProductName(license.skuId)\n        );\n        processedUser.assignedLicenses = productNames.join(', ');\n      } else {\n        processedUser.assignedLicenses = \"Unassigned\";\n      }\n\n      allProcessedData.push(processedUser);\n    }\n  }\n}\n\nreturn allProcessedData.map(user => ({ json: user }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -368
+      ],
+      "id": "555b0fa6-81bb-4afa-a6b0-bab040d4433e",
+      "name": "Pull License Assignments"
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListGraphRequest?tenantFilter={{ $('Convert to Domain Name').item.json.domain }}&Endpoint=subscribedSkus",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        -448
+      ],
+      "id": "96aa0b42-a539-411a-ab5d-1192b90f62bb",
+      "name": "Get Subscribed SKUs",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ms_license_reference",
+          "mode": "name"
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        -608
+      ],
+      "id": "a5081859-3176-4d6c-985b-b1ffb9e17bb7",
+      "name": "Get MS License Reference"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1232,
+        -400
+      ],
+      "id": "0d0d0751-2245-4ff9-a13a-07c176a50862",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "url": "=https://YOUR-CIPP-INSTANCE.azurewebsites.net/api/ListGraphRequest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "tenantfilter",
+              "value": "={{ $('Convert to Domain Name').item.json.domain }}"
+            },
+            {
+              "name": "endpoint",
+              "value": "roleManagement/directory/roleDefinitions"
+            },
+            {
+              "name": "$select",
+              "value": "id,displayName"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        800,
+        224
+      ],
+      "id": "b55f3f97-e6a7-45d5-a813-895cbe977355",
+      "name": "Get Role Definitions",
+      "retryOnFail": false,
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "CIPP OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input (from Merge3, append mode — 2 items):\n//   Item A: Get Admins response — roleManagement/directory/roleAssignments?$expand=principal\n//   Item B: Get Role Definitions response — roleManagement/directory/roleDefinitions?$select=id,displayName\n// Output: one row per { user, userPrincipalName, adminRole }\n\nconst items = $input.all().map(i => i.json);\n\n// Surface upstream API failures distinctly instead of silently returning\n// zero admins, which is indistinguishable from \"this tenant has no admins\".\nfor (const item of items) {\n  if (item && item.error) {\n    return [{\n      json: {\n        type: \"admin_fetch_error\",\n        message: item.error.message || \"Unknown error retrieving directory roles\",\n        status: item.error.status ?? null\n      }\n    }];\n  }\n}\n\n// Unwrap CIPP's {Results: [...]} envelope, tolerating a bare array too.\nfunction unwrap(item) {\n  if (Array.isArray(item?.Results)) return item.Results;\n  if (Array.isArray(item)) return item;\n  return item ? [item] : [];\n}\n\nlet assignments = [];\nlet definitions = [];\n\nfor (const item of items) {\n  const rows = unwrap(item);\n  for (const row of rows) {\n    if (!row) continue;\n    // Assignment rows carry principalId + roleDefinitionId.\n    // Definition rows carry id + displayName, no principalId.\n    if (row.principalId != null || row.roleDefinitionId != null) {\n      assignments.push(row);\n    } else if (row.id != null && row.displayName != null) {\n      definitions.push(row);\n    }\n  }\n}\n\nconst roleNameById = new Map();\nfor (const def of definitions) {\n  if (def?.id) roleNameById.set(def.id, def.displayName || def.id);\n}\n\nconst output = [];\nconst seen = new Set(); // dedupe user+role combos\n\nfor (const assignment of assignments) {\n  const principal = assignment.principal;\n  // Skip service principals / apps / groups - only keep real users\n  if (!principal || principal[\"@odata.type\"] !== \"#microsoft.graph.user\") {\n    continue;\n  }\n\n  const roleName = roleNameById.get(assignment.roleDefinitionId) || assignment.roleDefinitionId || \"Unknown Role\";\n  const userName = principal.displayName || principal.userPrincipalName || \"Unknown User\";\n  const upn = principal.userPrincipalName || principal.mail || \"\";\n\n  const key = `${upn}|${roleName}`;\n  if (seen.has(key)) continue;\n  seen.add(key);\n\n  output.push({\n    json: {\n      user: userName,\n      userPrincipalName: upn,\n      adminRole: roleName\n    }\n  });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        144
+      ],
+      "id": "e13b5d70-ef9b-4737-8f47-31793e052c27",
+      "name": "Identify Admin Assignments"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1040,
+        144
+      ],
+      "id": "07dbd1e7-0f61-4059-89f5-1715ce29c626",
+      "name": "Merge3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const skus = $input.first()?.json?.Results;\n// Every tenant has at least one SKU; empty means a bad response, not \"no Intune\".\nif (!Array.isArray(skus) || !skus.length) throw new Error('Get Subscribed SKUs returned no Results');\n\nconst ACTIVE = new Set(['Enabled', 'Warning']);\nconst INTUNE_PLAN = /^INTUNE_(A|A_VL|EDU)$/i;\n\nconst intuneSkus = skus\n  .filter(s => ACTIVE.has(s.capabilityStatus) &&\n    (s.servicePlans || []).some(p =>\n      INTUNE_PLAN.test(p.servicePlanName || '') && p.provisioningStatus === 'Success'))\n  .map(s => s.skuPartNumber);\n\nreturn [{ json: { intuneApplicable: intuneSkus.length > 0, intuneSkus } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        -544
+      ],
+      "id": "b173c207-9ccf-46cd-b3d6-6e284747b643",
+      "name": "InTune Applicability"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "07c9860a-e31a-46d3-b1fc-f49846327124",
+              "leftValue": "={{ $json.intuneApplicable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1232,
+        -544
+      ],
+      "id": "0f5d022d-197d-4848-8e00-8593626afb05",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "99b2884f-5934-4085-b4f4-91b23201129c",
+              "name": "type",
+              "value": "intune_not_applicable",
+              "type": "string"
+            },
+            {
+              "id": "8d67d8be-99f1-4664-a7f2-33e17aa65939",
+              "name": "reason",
+              "value": "No Intune-capable license",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1424,
+        -544
+      ],
+      "id": "06bc6ded-5735-4dfe-a3ec-c100e16a742f",
+      "name": "InTune Not Applicable"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "CIPP Get Users": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Pull Unlicensed and Enabled Users",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Convert to Domain Name": {
+      "main": [
+        [
+          {
+            "node": "CIPP Get Users",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MFA Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "CIPP Secure Score",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Sharepoint Storage",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Admins",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Last 30 days items older then that expire",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Subscribed SKUs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get MS License Reference",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Role Definitions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MFA Data": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Convert to Domain Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Clean Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Output": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Single Json Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CIPP Secure Score": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Scores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Scores": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Protected endpoint": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Sharepoint Storage": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Single Json Output": {
+      "main": [
+        []
+      ]
+    },
+    "Get Admins": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Last 30 days items older then that expire": {
+      "main": [
+        [
+          {
+            "node": "Summary of Email stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary of Email stats": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "unified output": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Pull Unlicensed and Enabled Users": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Pull License Assignments": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Subscribed SKUs": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "InTune Applicability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get MS License Reference": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Pull License Assignments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Admin Assignments": {
+      "main": [
+        [
+          {
+            "node": "unified output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Role Definitions": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge3": {
+      "main": [
+        [
+          {
+            "node": "Identify Admin Assignments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "InTune Applicability": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Protected endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "InTune Not Applicable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "InTune Not Applicable": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

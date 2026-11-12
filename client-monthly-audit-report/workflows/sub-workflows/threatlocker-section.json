@@ -1,0 +1,120 @@
+{
+  "name": "ThreatLocker Section",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://portalapi.c.threatlocker.com/portalapi/Computer/ComputerGetByAllParameters",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pageNumber\": 1,\n  \"pageSize\": 1000,\n  \"childOrganizations\": true,\n  \"searchText\": \"{{ $json.matchedName }}\",\n  \"sortBy\": \"ComputerName\",\n  \"sortDirection\": \"\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "b74b93e5-f151-4507-98b7-aec8098cd21f",
+      "name": "Get End Point data",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "ThreatLocker API Header"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Standardized ThreatLocker organization names\nconst standardizedNames = [\n  // Organization names exactly as they appear in ThreatLocker\n  \"Contoso Ltd\",\n  \"Fabrikam Inc\",\n  \"Northwind Traders\"\n];\n\n// --- Hard mappings (bypasses fuzzy matching) ---\nconst hardMappings = {\n  \"contoso\": \"Contoso Ltd\",\n  // Add more hard mappings here as needed:\n  // \"some other name\": \"Matched Name\",\n};\n\n// Function to calculate string similarity (Jaro-Winkler-like)\nfunction calculateSimilarity(str1, str2) {\n  const s1 = str1.toLowerCase().replace(/[^a-z0-9]/g, '');\n  const s2 = str2.toLowerCase().replace(/[^a-z0-9]/g, '');\n  \n  if (s1 === s2) return 1.0;\n  if (s1.length === 0 || s2.length === 0) return 0.0;\n  \n  if (s1.includes(s2) || s2.includes(s1)) {\n    return 0.8 + (0.2 * Math.min(s1.length, s2.length) / Math.max(s1.length, s2.length));\n  }\n  \n  const matrix = Array(s2.length + 1).fill().map(() => Array(s1.length + 1).fill(0));\n  \n  for (let i = 0; i <= s1.length; i++) matrix[0][i] = i;\n  for (let j = 0; j <= s2.length; j++) matrix[j][0] = j;\n  \n  for (let j = 1; j <= s2.length; j++) {\n    for (let i = 1; i <= s1.length; i++) {\n      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;\n      matrix[j][i] = Math.min(\n        matrix[j - 1][i] + 1,\n        matrix[j][i - 1] + 1,\n        matrix[j - 1][i - 1] + cost\n      );\n    }\n  }\n  \n  const maxLength = Math.max(s1.length, s2.length);\n  return 1 - (matrix[s2.length][s1.length] / maxLength);\n}\n\n// Get the client name from input\nconst inputName = $input.first().json[\"Client Name\"] || '';\n\n// Handle empty input\nif (!inputName) {\n  return [{\n    json: {\n      originalInput: inputName,\n      matchedName: null,\n      similarity: 0,\n      status: 'NO_INPUT',\n      error: 'Client Name field is empty or missing'\n    }\n  }];\n}\n\n// --- Check hard mappings first (case-insensitive) ---\nconst hardMatch = hardMappings[inputName.toLowerCase().trim()];\nif (hardMatch) {\n  return [{\n    json: {\n      originalInput: inputName,\n      matchedName: hardMatch,\n      similarity: 1,\n      status: 'HARD_MAPPED',\n      threshold: null,\n      allCandidates: []\n    }\n  }];\n}\n\n// Find best fuzzy match\nlet bestMatch = null;\nlet bestSimilarity = 0;\n\nstandardizedNames.forEach(standardName => {\n  const similarity = calculateSimilarity(inputName, standardName);\n  if (similarity > bestSimilarity) {\n    bestSimilarity = similarity;\n    bestMatch = standardName;\n  }\n});\n\nconst SIMILARITY_THRESHOLD = 0.75;\n\nreturn [{\n  json: {\n    originalInput: inputName,\n    matchedName: bestSimilarity >= SIMILARITY_THRESHOLD ? bestMatch : null,\n    similarity: Math.round(bestSimilarity * 100) / 100,\n    status: bestSimilarity >= SIMILARITY_THRESHOLD ? 'MATCHED' : 'NO_MATCH',\n    threshold: SIMILARITY_THRESHOLD,\n    allCandidates: standardizedNames.map(name => ({\n      name: name,\n      similarity: Math.round(calculateSimilarity(inputName, name) * 100) / 100\n    })).sort((a, b) => b.similarity - a.similarity).slice(0, 3)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "94734de8-a983-4e89-82ae-df9f47075933",
+      "name": "Transform Name for Threatlocker"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all computer data from previous node\nconst computers = $input.all();\n\n// Initialize counters\nconst stats = {\n  totalEndpoints: 0,\n  activeEndpoints: 0,\n  offlineEndpoints: 0,\n  inactiveEndpoints: 0,\n  inactiveDevices: []\n};\n\n// Process each computer\ncomputers.forEach(computer => {\n  const data = computer.json;\n  \n  // Count total endpoints\n  stats.totalEndpoints++;\n  \n  // Count by status\n  const status = data.driverStatusString;\n  switch(status) {\n    case 'Active':\n      stats.activeEndpoints++;\n      break;\n    case 'Offline':\n      stats.offlineEndpoints++;\n      break;\n    case 'Inactive':\n      stats.inactiveEndpoints++;\n      // Add inactive device details\n      stats.inactiveDevices.push({\n        computerName: data.computerName,\n        hostname: data.hostname,\n        lastCheckin: data.lastCheckin\n      });\n      break;\n  }\n});\n\n// Create final output\nconst result = {\n  summary: {\n    totalEndpoints: stats.totalEndpoints,\n    activeEndpoints: stats.activeEndpoints,\n    offlineEndpoints: stats.offlineEndpoints,\n    inactiveEndpoints: stats.inactiveEndpoints,\n    statusPercentages: {\n      active: Math.round((stats.activeEndpoints / stats.totalEndpoints) * 100),\n      offline: Math.round((stats.offlineEndpoints / stats.totalEndpoints) * 100),\n      inactive: Math.round((stats.inactiveEndpoints / stats.totalEndpoints) * 100)\n    }\n  },\n  inactiveDevices: stats.inactiveDevices,\n  inactiveDeviceCount: stats.inactiveDevices.length\n};\n\n// Return the results\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        0
+      ],
+      "id": "3be52d4a-b6ad-4732-8ac5-bab0fe708b7a",
+      "name": "Summary"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "676b5eae-e091-4ff1-87ae-6dcc67374073",
+      "name": "When Executed by Another Workflow"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get End Point data": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Name for Threatlocker": {
+      "main": [
+        [
+          {
+            "node": "Get End Point data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Transform Name for Threatlocker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

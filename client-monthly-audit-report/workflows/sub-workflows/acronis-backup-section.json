@@ -1,0 +1,268 @@
+{
+  "name": "Acronis Backup Section",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "a5d594ee-e090-442c-be60-094619f419b7",
+      "name": "Report Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -352,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Hard Map: Client Name → Acronis Tenant ID ───────────────────────────────\n// null = no matching Acronis tenant found (not yet onboarded or name unknown)\n\nconst CLIENT_TENANT_MAP = {\n  \"Contoso Ltd\":       \"00000000-0000-0000-0000-000000000001\",\n  \"Fabrikam Inc\":      \"00000000-0000-0000-0000-000000000002\",\n  \"Northwind Traders\": null,\n};\n\n// ─── Lookup ───────────────────────────────────────────────────────────────────\nconst input = $input.first().json;\nconst clientName = input[\"Client Name\"] ?? \"\";\nconst tenantId = CLIENT_TENANT_MAP[clientName] ?? null;\n\nreturn [{\n  json: {\n    ...input,\n    acronis: {\n      matched: tenantId !== null,\n      tenantId: tenantId,\n    }\n  }\n}];"
+      },
+      "id": "fb514212-8a08-4681-8df1-1594415f700e",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "be44647e-7a57-403c-b42c-b5a2209beb9c",
+                    "leftValue": "={{ $json.acronis.matched }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "No match"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "6120607c-d573-4648-b4b1-9b2c4aa7fc3c",
+                    "leftValue": "={{ $json.acronis.matched }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Match"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "792855e7-6996-4def-a4a8-5f19e8431429",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      summary: \"No acronis data found\",\n    },\n  },\n];"
+      },
+      "id": "17408561-dd3d-457b-9b83-d56da35fb95c",
+      "name": "No acronis data found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://us5-cloud.acronis.com/api/2/tenants/{{$json.acronis.tenantId}}/usages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbd270a1-4db7-40c0-b107-daed8a6d718a",
+      "name": "Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        416,
+        0
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Acronis OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const allInputs = $input.all().map((i) => i.json);\nconst input = allInputs.length > 1 ? allInputs : allInputs[0];\n\n// Support: [{ items: [...] }], { items: [...] }, or a flat usage array\nlet usageItems = [];\nif (Array.isArray(input) && input[0]?.items) {\n  usageItems = input[0].items;\n} else if (Array.isArray(input?.items)) {\n  usageItems = input.items;\n} else if (Array.isArray(input) && input[0]?.usage_name) {\n  usageItems = input;\n} else if (Array.isArray(input?.body?.[0]?.items)) {\n  usageItems = input.body[0].items;\n} else {\n  throw new Error('Could not find usage items array in input');\n}\n\nconst BYTES_PER_TB = 1024 ** 4;\nconst BYTES_PER_GB = 1024 ** 3;\n\nfunction bytesToTb(bytes) {\n  return Math.round((bytes / BYTES_PER_TB) * 100) / 100;\n}\n\nfunction bytesToGb(bytes) {\n  return Math.round((bytes / BYTES_PER_GB) * 100) / 100;\n}\n\nfunction find(name, opts = {}) {\n  return usageItems.find((i) => {\n    if (i.name !== name) return false;\n    if (opts.edition && i.edition !== opts.edition) return false;\n    if (opts.status !== undefined && i.offering_item?.status !== opts.status) return false;\n    if (opts.infra_id && i.infra_id !== opts.infra_id) return false;\n    return true;\n  });\n}\n\nfunction val(item) {\n  return item?.value ?? item?.absolute_value ?? 0;\n}\n\n// Prefer active (status 1) per-workload rows with real usage\nconst storage = find('pw_base_storage', { edition: 'pck_per_workload', status: 1 })\n  || usageItems.find((i) => i.name === 'pw_base_storage' && val(i) > 0);\n\nconst drStorage = find('pw_base_adv_dr_storage', { edition: 'pck_per_workload', status: 1 })\n  || usageItems.find((i) => i.name === 'pw_base_adv_dr_storage' && val(i) > 0);\n\nconst workstations = find('pw_base_workstations', { status: 1 });\nconst servers = find('pw_base_servers', { status: 1 });\nconst vms = find('pw_base_vms', { status: 1 });\nconst totalWorkloads = find('total_protected_workloads');\nconst totalStorage = find('total_storage');\n\nconst backupInfraId = storage?.infra_id;\nconst drInfraId = drStorage?.infra_id;\n\nconst workstationStorage = usageItems.find((i) => i.name === 'workstation_storage' && i.infra_id === backupInfraId);\nconst serverStorage = usageItems.find((i) => i.name === 'server_storage' && i.infra_id === backupInfraId);\nconst vmStorage = usageItems.find((i) => i.name === 'vm_storage' && i.infra_id === backupInfraId);\nconst immutableStorage = usageItems.find((i) => i.name === 'immutable_storage' && i.infra_id === backupInfraId);\n\nconst drCloudServers = find('pw_base_adv_dr_cloud_servers', { status: 1 });\nconst assignedCompute = usageItems.find((i) => i.name === 'assigned_compute_points' && i.infra_id === drInfraId);\nconst publicIps = find('pw_base_adv_dr_public_ips', { status: 1 });\nconst computePoints = find('pw_base_adv_dr_compute_points', { status: 1 });\n\nconst sample = storage || workstations || usageItems[0];\n\nconst summary = {\n  tenant_id: sample?.tenant_id ?? null,\n  tenant_uuid: sample?.tenant_uuid ?? null,\n  period: sample?.range_start ?? null,\n  edition: 'pck_per_workload',\n\n  protected_workloads: {\n    total: val(totalWorkloads),\n    workstations: val(workstations),\n    servers: val(servers),\n    vms: val(vms),\n  },\n\n  backup_storage: {\n    infra_id: backupInfraId ?? null,\n    total_bytes: val(storage) || val(totalStorage),\n    total_tb: bytesToTb(val(storage) || val(totalStorage)),\n    workstations_tb: bytesToTb(val(workstationStorage)),\n    servers_tb: bytesToTb(val(serverStorage)),\n    vms_tb: bytesToTb(val(vmStorage)),\n    immutable_tb: bytesToTb(val(immutableStorage)),\n    workstations_bytes: val(workstationStorage),\n    servers_bytes: val(serverStorage),\n    vms_bytes: val(vmStorage),\n    immutable_bytes: val(immutableStorage),\n  },\n\n  disaster_recovery: {\n    infra_id: drInfraId ?? null,\n    storage_bytes: val(drStorage),\n    storage_tb: bytesToTb(val(drStorage)),\n    cloud_servers: val(drCloudServers),\n    assigned_compute_points_seconds: val(assignedCompute),\n    public_ips: val(publicIps),\n    compute_points_used: val(computePoints),\n  },\n\n  // Human-readable one-liner\n  bottom_line: (() => {\n    const wl = val(totalWorkloads);\n    const bak = bytesToTb(val(storage) || val(totalStorage));\n    const dr = bytesToTb(val(drStorage));\n    const drServers = val(drCloudServers);\n    return `Per-workload billing: ${wl} protected devices `\n      + `(${val(workstations)} WS + ${val(servers)} servers + ${val(vms)} VMs), `\n      + `~${bak} TB backup storage, ~${dr} TB DR storage, ${drServers} DR cloud servers.`;\n  })(),\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "b36ef7de-a776-456c-a6ae-a2e4d99de24e",
+      "name": "Code in JavaScript1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const editionLabels = {\n  pck_per_workload: 'Per-workload',\n  pck_per_gigabyte: 'Per-gigabyte',\n};\n\nfunction summarize(row) {\n  const workloads = row.protected_workloads || {};\n  const backup = row.backup_storage || {};\n  const dr = row.disaster_recovery || {};\n\n  const period = row.period\n    ? DateTime.fromISO(row.period).toFormat('yyyy-MM')\n    : null;\n\n  const edition = editionLabels[row.edition] || row.edition || null;\n\n  const protectedWorkloads = workloads.total ?? 0;\n  const workstations = workloads.workstations ?? 0;\n  const servers = workloads.servers ?? 0;\n  const vms = workloads.vms ?? 0;\n\n  const backupTb = backup.total_tb ?? 0;\n  const drTb = dr.storage_tb ?? 0;\n  const drCloudServers = dr.cloud_servers ?? 0;\n\n  const summary =\n    row.bottom_line ||\n    `${edition || 'Billing'}: ${protectedWorkloads} protected devices ` +\n      `(${workstations} WS + ${servers} servers + ${vms} VMs), ` +\n      `~${backupTb} TB backup, ~${drTb} TB DR, ${drCloudServers} DR cloud servers.`;\n\n  return {\n    period,\n    edition,\n    protected_workloads: protectedWorkloads,\n    workstations,\n    servers,\n    vms,\n    backup_storage_tb: backupTb,\n    dr_storage_tb: drTb,\n    dr_cloud_servers: drCloudServers,\n    summary,\n  };\n}\n\n// Supports: array on first item, or one usage object per item\nconst raw = $input.first().json;\nconst rows = Array.isArray(raw)\n  ? raw\n  : Array.isArray(raw?.data)\n    ? raw.data\n    : $input.all().map((i) => i.json);\n\nreturn rows.map((row) => ({ json: summarize(row) }));"
+      },
+      "id": "91b7b592-493e-472b-9ec4-2858293aebc9",
+      "name": "Code in JavaScript2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://us5-cloud.acronis.com/api/2/tenants",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "parent_id",
+              "value": "YOUR_ACRONIS_PARTNER_TENANT_ID"
+            },
+            {
+              "name": "kind",
+              "value": "customer"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "825cabfb-b50c-4a51-821d-19143928ca43",
+      "name": "Get Tenant IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        688
+      ],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Acronis OAuth2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Report Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "No acronis data found",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usage": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

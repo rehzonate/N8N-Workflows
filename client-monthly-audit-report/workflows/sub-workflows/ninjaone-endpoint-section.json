@@ -1,0 +1,603 @@
+{
+  "name": "NinjaOne Endpoint Section",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "Device Security Inventory Section  -- this creates the section for use in the Main Report V2 workflow",
+        "height": 796,
+        "width": 1084,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        864,
+        128
+      ],
+      "typeVersion": 1,
+      "id": "a045e9d3-8e29-43f6-844c-8f7f73d5b133",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        96,
+        336
+      ],
+      "id": "fcbf52e2-ca9f-4d0d-bd39-843a35e70ed9",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ingest input and normalize to a devices array\nconst inputItems = $input.all().map(i => i.json);\n\nfunction isDevice(obj) {\n  return obj && typeof obj === 'object' &&\n    ('deviceId' in obj) &&\n    obj.antivirus && obj.operatingSystem;\n}\n\nlet devices = [];\nfor (const j of inputItems) {\n  if (Array.isArray(j)) {\n    for (const x of j) if (isDevice(x)) devices.push(x);\n    continue;\n  }\n  if (Array.isArray(j?.results)) {\n    for (const x of j.results) if (isDevice(x)) devices.push(x);\n    continue;\n  }\n  if (isDevice(j)) devices.push(j);\n}\n\n// Helpers\nfunction normalizeState(state) {\n  const t = String(state ?? '').trim().toUpperCase();\n  if (t === 'ON' || t === 'ACTIVE' || t === 'ENABLED' || t.includes(' ON') || t.startsWith('ON ')) return 'ON';\n  if (t === 'OFF' || t === 'DISABLED' || t === 'SNOOZED' || t === 'EXPIRED' || t.includes(' OFF') || t.startsWith('OFF ')) return 'OFF';\n  return 'UNKNOWN';\n}\nfunction normalizeDef(def) {\n  const t = String(def ?? '').trim().toUpperCase().replace(/\\s+/g, '-');\n  if (t.includes('UP-TO-DATE')) return 'Up-to-Date';\n  if (t.includes('OUT-OF-DATE') || t.includes('OUT-OFDATE') || t.includes('OUTOFDATE')) return 'Out-of-Date';\n  return 'Unknown';\n}\n\nconst totalDevices = devices.length;\n\n// Initialize counters and collections\nlet protectedEndpoints = 0;\nlet unprotectedEndpoints = 0;\nlet operatingSystems = {};\nlet antivirusProducts = {};\nlet outdatedDefinitions = 0;\nlet antivirusOff = 0;\n\n// Patch counters\nlet totalMissingPatches = 0;\nlet devicesWithMissingPatches = 0;\nlet devicesFullyPatched = 0;\nconst devicesMissingPatchesBreakdown = [];\n\n// Vulnerability counters\nlet devicesWithCriticalVulns = 0;\nlet devicesWithHighVulns = 0;\nlet totalCriticalVulns = 0;\nlet totalHighVulns = 0;\nconst devicesWithVulnsBreakdown = []; // { deviceId, deviceName, critical, high, medium, low }\n\n// Security status counters\nlet securityStatus = {\n  fullyProtected: 0,\n  partiallyProtected: 0,\n  unprotected: 0,\n  unknown: 0\n};\n\n// Process each device\nfor (const device of devices) {\n  const antivirus = device.antivirus || {};\n  const os = device.operatingSystem || {};\n  const patches = device.patches || {};\n  const vulns = device.vulnerabilities || {};\n\n  const productName = (antivirus.productName || '').trim();\n  const productState = normalizeState(antivirus.productState);\n  const defStatus = normalizeDef(antivirus.definitionStatus);\n\n  // Count protection status\n  if (!productName || productName.toUpperCase() === 'NONE') {\n    unprotectedEndpoints++;\n    securityStatus.unprotected++;\n  } else {\n    protectedEndpoints++;\n\n    if (productState === 'ON') {\n      if (defStatus === 'Up-to-Date') {\n        securityStatus.fullyProtected++;\n      } else if (defStatus === 'Out-of-Date') {\n        securityStatus.partiallyProtected++;\n        outdatedDefinitions++;\n      } else {\n        securityStatus.partiallyProtected++;\n      }\n    } else if (productState === 'OFF') {\n      antivirusOff++;\n      securityStatus.partiallyProtected++;\n    } else {\n      securityStatus.unknown++;\n    }\n  }\n\n  // Count antivirus products\n  const avKey = productName || 'NONE';\n  antivirusProducts[avKey] = (antivirusProducts[avKey] || 0) + 1;\n\n  // Count operating systems\n  const osName = (os.name || 'Unknown').trim();\n  const osKey = `${osName} ${os.releaseId || ''}`.trim();\n\n  if (!operatingSystems[osName]) {\n    operatingSystems[osName] = { total: 0, versions: {} };\n  }\n\n  operatingSystems[osName].total++;\n  operatingSystems[osName].versions[osKey] = (operatingSystems[osName].versions[osKey] || 0) + 1;\n\n  // Count missing patches\n  const missingCount = Number(patches.missingPatchCount) || 0;\n  const missingPatchesList = Array.isArray(patches.missingPatches) ? patches.missingPatches : [];\n\n  totalMissingPatches += missingCount;\n\n  if (missingCount > 0) {\n    devicesWithMissingPatches++;\n    devicesMissingPatchesBreakdown.push({\n      deviceId: device.deviceId,\n      deviceName: device.deviceName ?? `Device ${device.deviceId}`,\n      missingPatchCount: missingCount,\n      missingPatches: missingPatchesList\n    });\n  } else {\n    devicesFullyPatched++;\n  }\n\n  // Count vulnerabilities\n  const criticalCount = Number(vulns.critical) || 0;\n  const highCount = Number(vulns.high) || 0;\n  const mediumCount = Number(vulns.medium) || 0;\n  const lowCount = Number(vulns.low) || 0;\n\n  totalCriticalVulns += criticalCount;\n  totalHighVulns += highCount;\n\n  if (criticalCount > 0) devicesWithCriticalVulns++;\n  if (highCount > 0) devicesWithHighVulns++;\n\n  if (criticalCount > 0 || highCount > 0) {\n    devicesWithVulnsBreakdown.push({\n      deviceId: device.deviceId,\n      deviceName: device.deviceName ?? `Device ${device.deviceId}`,\n      critical: criticalCount,\n      high: highCount,\n      medium: mediumCount,\n      low: lowCount,\n    });\n  }\n}\n\n// Calculate percentages (guard divide-by-zero)\nconst protectedPercentage = totalDevices ? ((protectedEndpoints / totalDevices) * 100).toFixed(1) : '0.0';\nconst unprotectedPercentage = totalDevices ? ((unprotectedEndpoints / totalDevices) * 100).toFixed(1) : '0.0';\nconst patchCompliancePercentage = totalDevices ? ((devicesFullyPatched / totalDevices) * 100).toFixed(1) : '0.0';\n\n// Identify security risks\nconst securityRisks = [];\nif (unprotectedEndpoints > 0) securityRisks.push(`${unprotectedEndpoints} endpoints have no antivirus protection`);\nif (outdatedDefinitions > 0) securityRisks.push(`${outdatedDefinitions} endpoints have outdated antivirus definitions`);\nif (antivirusOff > 0) securityRisks.push(`${antivirusOff} endpoints have antivirus disabled`);\nif (totalMissingPatches > 0) securityRisks.push(`${totalMissingPatches} missing patches across ${devicesWithMissingPatches} endpoints`);\nif (devicesWithCriticalVulns > 0) securityRisks.push(`${devicesWithCriticalVulns} endpoints have critical vulnerabilities`);\nif (devicesWithHighVulns > 0) securityRisks.push(`${devicesWithHighVulns} endpoints have high-severity vulnerabilities`);\n\n// Find most common OS\nconst mostCommonOS = Object.entries(operatingSystems).sort((a, b) => b[1].total - a[1].total)[0];\n\n// Find legacy/unsupported systems\nconst legacySystems = Object.entries(operatingSystems)\n  .filter(([osName]) =>\n    osName.includes('Windows 10') ||\n    osName.includes('Server 2012') ||\n    osName.includes('Server 2016') ||\n    osName.includes('1809')\n  )\n  .reduce((total, [, osData]) => total + osData.total, 0);\n\n// Sort devices with missing patches by count descending\ndevicesMissingPatchesBreakdown.sort((a, b) => b.missingPatchCount - a.missingPatchCount);\n\n// Sort devices with vulns: critical desc, then high desc\ndevicesWithVulnsBreakdown.sort((a, b) => b.critical - a.critical || b.high - a.high);\n\n// Create summary object\nconst endpointSummary = {\n  type: 'endpoint_summary',\n  processedAt: new Date().toISOString(),\n\n  // Core metrics\n  totalEndpoints: totalDevices,\n  protectedEndpoints: protectedEndpoints,\n  unprotectedEndpoints: unprotectedEndpoints,\n  protectedPercentage: parseFloat(protectedPercentage),\n  unprotectedPercentage: parseFloat(unprotectedPercentage),\n\n  // Patch metrics\n  totalMissingPatches: totalMissingPatches,\n  devicesWithMissingPatches: devicesWithMissingPatches,\n  devicesFullyPatched: devicesFullyPatched,\n  patchCompliancePercentage: parseFloat(patchCompliancePercentage),\n  averageMissingPatchesPerDevice: totalDevices ? parseFloat((totalMissingPatches / totalDevices).toFixed(2)) : 0,\n\n  // Security status breakdown\n  securityStatus: {\n    fullyProtected: securityStatus.fullyProtected,\n    partiallyProtected: securityStatus.partiallyProtected,\n    unprotected: securityStatus.unprotected,\n    unknown: securityStatus.unknown\n  },\n\n  // Security metrics\n  outdatedDefinitions: outdatedDefinitions,\n  antivirusDisabled: antivirusOff,\n  securityScore: totalDevices ? ((securityStatus.fullyProtected / totalDevices) * 100).toFixed(1) : '0.0',\n\n  // Operating system breakdown\n  operatingSystemSummary: {\n    totalOSTypes: Object.keys(operatingSystems).length,\n    mostCommonOS: mostCommonOS ? mostCommonOS[0] : 'Unknown',\n    mostCommonOSCount: mostCommonOS ? mostCommonOS[1].total : 0,\n    legacySystemsCount: legacySystems,\n    legacySystemsPercentage: totalDevices ? ((legacySystems / totalDevices) * 100).toFixed(1) : '0.0'\n  },\n\n  // Patch breakdown\n  patchSummary: {\n    totalMissingPatches: totalMissingPatches,\n    devicesWithMissingPatches: devicesWithMissingPatches,\n    devicesFullyPatched: devicesFullyPatched,\n    patchCompliancePercentage: parseFloat(patchCompliancePercentage),\n    topDevicesWithMissingPatches: devicesMissingPatchesBreakdown.slice(0, 10)\n  },\n\n  // Vulnerability breakdown\n  vulnerabilitySummary: {\n    devicesWithCriticalVulns: devicesWithCriticalVulns,\n    devicesWithHighVulns: devicesWithHighVulns,\n    totalCriticalVulns: totalCriticalVulns,\n    totalHighVulns: totalHighVulns,\n    topDevicesWithVulns: devicesWithVulnsBreakdown.slice(0, 10)\n  },\n\n  // Detailed breakdowns\n  operatingSystemBreakdown: operatingSystems,\n  antivirusProductBreakdown: antivirusProducts,\n\n  // Security recommendations\n  securityRisks: securityRisks,\n\n  // Key insights for reporting\n  keyInsights: {\n    criticalFindings: securityRisks.length,\n    complianceLevel:\n      totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.95) ? 'Good' :\n      totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.80) ? 'Fair' : 'Poor',\n    modernizationNeeded: legacySystems > 0,\n    patchingNeeded: totalMissingPatches > 0,\n    immediateActions: [\n      ...(devicesWithCriticalVulns > 0 ? [`Remediate critical vulnerabilities on ${devicesWithCriticalVulns} endpoints`] : []),\n      ...(unprotectedEndpoints > 0 ? [`Install antivirus on ${unprotectedEndpoints} unprotected endpoints`] : []),\n      ...(outdatedDefinitions > 0 ? [`Update antivirus definitions on ${outdatedDefinitions} endpoints`] : []),\n      ...(antivirusOff > 0 ? [`Enable antivirus on ${antivirusOff} endpoints`] : []),\n      ...(totalMissingPatches > 0 ? [`Patch ${totalMissingPatches} missing updates across ${devicesWithMissingPatches} endpoints`] : [])\n    ].slice(0, 4)\n  }\n};\n\n// Create simplified metrics for easy access\nconst quickStats = {\n  totalEndpoints: totalDevices,\n  protectedCount: protectedEndpoints,\n  unprotectedCount: unprotectedEndpoints,\n  protectionRate: `${protectedPercentage}%`,\n  totalMissingPatches: totalMissingPatches,\n  devicesWithMissingPatches: devicesWithMissingPatches,\n  patchComplianceRate: `${patchCompliancePercentage}%`,\n  devicesWithCriticalVulns: devicesWithCriticalVulns,\n  devicesWithHighVulns: devicesWithHighVulns,\n  securityGrade:\n    totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.95) ? 'A' :\n    totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.90) ? 'B' :\n    totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.80) ? 'C' :\n    totalDevices && (securityStatus.fullyProtected >= totalDevices * 0.70) ? 'D' : 'F',\n  riskLevel: securityRisks.length === 0 ? 'Low' :\n             securityRisks.length <= 2 ? 'Medium' : 'High'\n};\n\n// Output one summary item\nreturn [{\n  json: {\n    ...endpointSummary,\n    quickStats,\n    devicesDetailed: devices\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        368
+      ],
+      "id": "98787027-06f6-4711-a951-a671d9dbf9b3",
+      "name": "Summarize"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect AV + OS + Patches + Vulnerabilities + Devices from connected inputs\nconst incoming = $input.all();\n\nlet antivirusData = [];\nlet osData = [];\nlet devicesData = [];\nlet patchData = [];\nlet vulnData = [];\nconst deviceNameMap = new Map();\n\nfunction normalizeState(state) {\n  const t = String(state ?? '').trim().toUpperCase();\n  if (t === 'ON' || t === 'ACTIVE' || t === 'ENABLED' || t.startsWith('ON ') || t.includes('(ON)') || t.includes(' ON ')) return 'ON';\n  if (t === 'OFF' || t === 'DISABLED' || t.startsWith('OFF ') || t.includes('(OFF)') || t.includes(' OFF ')) return 'OFF';\n  if (t === 'SNOOZED' || t === 'EXPIRED') return 'OFF';\n  if (t === 'UNKNOWN') return 'UNKNOWN';\n  return t || 'UNKNOWN';\n}\nfunction stateScore(item) {\n  const name = String(item?.productName ?? '').trim().toUpperCase();\n  if (name === 'NONE' || name === 'NO AV' || name === 'NO ANTIVIRUS') return -1;\n  const n = normalizeState(item?.productState);\n  if (n === 'ON') return 2;\n  if (n === 'UNKNOWN') return 1;\n  return 0;\n}\nfunction toNumber(n) {\n  const v = Number(n);\n  return Number.isNaN(v) ? undefined : v;\n}\nfunction strOrUnknown(v) {\n  const s = v == null ? '' : String(v);\n  return s.trim() === '' ? 'Unknown' : s;\n}\n\nfunction collectFromObject(obj) {\n  if (!obj || typeof obj !== 'object') return;\n\n  if (Array.isArray(obj.results)) {\n    for (const r of obj.results) collectFromObject(r);\n    return;\n  }\n  if (Array.isArray(obj.devices)) {\n    for (const d of obj.devices) collectFromObject(d);\n    return;\n  }\n  if (Array.isArray(obj.data?.results)) {\n    for (const r of obj.data.results) collectFromObject(r);\n    return;\n  }\n  if (Array.isArray(obj.data?.devices)) {\n    for (const d of obj.data.devices) collectFromObject(d);\n    return;\n  }\n\n  // Vulnerability / device-health row — checked before AV/OS/patch/device\n  if (obj.deviceId !== undefined && (\n    'criticalVulnerabilityCount' in obj ||\n    'highVulnerabilityCount' in obj ||\n    'mediumVulnerabilityCount' in obj ||\n    'lowVulnerabilityCount' in obj\n  )) {\n    const idNum = toNumber(obj.deviceId);\n    if (idNum !== undefined) {\n      vulnData.push({\n        deviceId: idNum,\n        criticalVulnerabilityCount: toNumber(obj.criticalVulnerabilityCount) ?? 0,\n        highVulnerabilityCount: toNumber(obj.highVulnerabilityCount) ?? 0,\n        mediumVulnerabilityCount: toNumber(obj.mediumVulnerabilityCount) ?? 0,\n        lowVulnerabilityCount: toNumber(obj.lowVulnerabilityCount) ?? 0,\n        healthStatus: obj.healthStatus ?? 'UNKNOWN',\n        offline: obj.offline ?? null,\n      });\n    }\n    return;\n  }\n\n  if (obj.deviceId !== undefined && (Array.isArray(obj.patches) || Array.isArray(obj.missingPatches))) {\n    const idNum = toNumber(obj.deviceId);\n    if (idNum !== undefined) {\n      let names = [];\n      if (Array.isArray(obj.missingPatches)) {\n        names = obj.missingPatches.map((p) => (typeof p === 'string' ? p : p?.name ?? null)).filter((n) => n != null);\n      } else if (Array.isArray(obj.patches)) {\n        names = obj.patches.map((p) => p?.name ?? null).filter((n) => n != null);\n      }\n      patchData.push({\n        deviceId: idNum,\n        missingPatchCount: obj.patchCount ?? obj.missingPatchCount ?? names.length,\n        missingPatches: names,\n        timestamp: toNumber(obj.timestamp) ?? toNumber(obj.lastSeen) ?? 0,\n      });\n    }\n    return;\n  }\n\n  if (obj.deviceId !== undefined && ('productName' in obj || 'productState' in obj || 'definitionStatus' in obj)) {\n    const idNum = toNumber(obj.deviceId);\n    if (idNum !== undefined) {\n      antivirusData.push({\n        deviceId: idNum,\n        productName: obj.productName ?? null,\n        productState: obj.productState ?? null,\n        definitionStatus: obj.definitionStatus ?? null,\n        version: obj.version ?? null,\n        timestamp: toNumber(obj.timestamp) ?? 0,\n      });\n    }\n    return;\n  }\n\n  if (obj.deviceId !== undefined && ('manufacturer' in obj || 'buildNumber' in obj || 'releaseId' in obj)) {\n    const idNum = toNumber(obj.deviceId);\n    if (idNum !== undefined) {\n      osData.push({\n        deviceId: idNum,\n        manufacturer: obj.manufacturer ?? null,\n        name: obj.name ?? null,\n        releaseId: obj.releaseId ?? null,\n        timestamp: toNumber(obj.timestamp) ?? 0,\n      });\n    }\n    return;\n  }\n\n  const looksLikeDevice =\n    ('id' in obj || 'deviceId' in obj) &&\n    ('displayName' in obj || 'systemName' in obj || 'dnsName' in obj || 'uid' in obj || 'nodeClass' in obj);\n\n  if (looksLikeDevice) {\n    devicesData.push(obj);\n    const idNum = toNumber(obj.deviceId ?? obj.id);\n    if (idNum !== undefined) {\n      const name = obj.displayName ?? obj.systemName ?? obj.dnsName ?? obj.deviceName;\n      if (typeof name === 'string' && name.trim() !== '') deviceNameMap.set(idNum, name);\n    }\n    return;\n  }\n\n  for (const v of Object.values(obj)) {\n    if (Array.isArray(v)) {\n      for (const e of v) collectFromObject(e);\n    } else if (v && typeof v === 'object') {\n      collectFromObject(v);\n    }\n  }\n}\n\nfor (const item of incoming) {\n  const j = item?.json;\n  if (Array.isArray(j)) {\n    for (const x of j) collectFromObject(x);\n    continue;\n  }\n  collectFromObject(j);\n}\n\nconst osDataMap = new Map();\nfor (const item of osData) {\n  const idNum = item.deviceId;\n  const existing = osDataMap.get(idNum);\n  if (!existing || (toNumber(item.timestamp) ?? 0) > (toNumber(existing.timestamp) ?? 0)) {\n    osDataMap.set(idNum, item);\n  }\n}\n\nconst antivirusDataMap = new Map();\nfor (const item of antivirusData) {\n  const idNum = item.deviceId;\n  const candidateScore = stateScore(item);\n  const candidateTs = toNumber(item.timestamp) ?? 0;\n  const existing = antivirusDataMap.get(idNum);\n  if (!existing) {\n    antivirusDataMap.set(idNum, item);\n    continue;\n  }\n  const existingScore = stateScore(existing);\n  const existingTs = toNumber(existing.timestamp) ?? 0;\n  if (candidateScore > existingScore || (candidateScore === existingScore && candidateTs > existingTs)) {\n    antivirusDataMap.set(idNum, item);\n  }\n}\n\nconst patchDataMap = new Map();\nfor (const item of patchData) {\n  const idNum = item.deviceId;\n  const existing = patchDataMap.get(idNum);\n  if (!existing) {\n    patchDataMap.set(idNum, item);\n    continue;\n  }\n  const candidateTs = toNumber(item.timestamp) ?? 0;\n  const existingTs = toNumber(existing.timestamp) ?? 0;\n  if (item.missingPatches.length > existing.missingPatches.length ||\n      (item.missingPatches.length === existing.missingPatches.length && candidateTs > existingTs)) {\n    patchDataMap.set(idNum, item);\n  }\n}\n\nconst vulnDataMap = new Map();\nfor (const item of vulnData) {\n  vulnDataMap.set(item.deviceId, item);\n}\n\nconst deviceMap = new Map();\nfor (const d of devicesData) {\n  const idFromId = toNumber(d.id);\n  if (idFromId !== undefined) deviceMap.set(idFromId, d);\n  const idFromDeviceId = toNumber(d.deviceId);\n  if (idFromDeviceId !== undefined && !deviceMap.has(idFromDeviceId)) deviceMap.set(idFromDeviceId, d);\n}\n\nconst allDeviceIds = new Set([\n  ...antivirusData.map(i => i.deviceId),\n  ...osData.map(i => i.deviceId),\n  ...patchData.map(i => i.deviceId),\n  ...vulnData.map(i => i.deviceId),\n  ...devicesData.map(d => toNumber(d.id)).filter(n => n !== undefined),\n  ...devicesData.map(d => toNumber(d.deviceId)).filter(n => n !== undefined),\n  ...Array.from(deviceNameMap.keys()),\n]);\n\nconst combinedResults = [];\nfor (const deviceId of allDeviceIds) {\n  const antivirusInfo = antivirusDataMap.get(deviceId) || {};\n  const osInfo = osDataMap.get(deviceId) || {};\n  const deviceInfo = deviceMap.get(deviceId) || {};\n  const patchInfo = patchDataMap.get(deviceId) || {};\n  const vulnInfo = vulnDataMap.get(deviceId) || {};\n\n  const deviceName =\n    deviceInfo.displayName ??\n    deviceInfo.systemName ??\n    deviceInfo.dnsName ??\n    deviceInfo.deviceName ??\n    deviceNameMap.get(deviceId) ??\n    `Device ${deviceId}`;\n\n  const defStat = String(antivirusInfo.definitionStatus ?? '').trim();\n  const missingPatches = Array.isArray(patchInfo.missingPatches) ? patchInfo.missingPatches : [];\n\n  combinedResults.push({\n    deviceId,\n    deviceName: strOrUnknown(deviceName),\n    antivirus: {\n      productName: strOrUnknown(antivirusInfo.productName ?? 'Unknown'),\n      productState: normalizeState(antivirusInfo.productState ?? 'UNKNOWN'),\n      definitionStatus: defStat === '' ? 'Unknown' : defStat,\n      version: strOrUnknown(antivirusInfo.version ?? 'Unknown'),\n      timestamp: antivirusInfo.timestamp ?? 0,\n    },\n    operatingSystem: {\n      manufacturer: strOrUnknown(osInfo.manufacturer ?? 'Unknown'),\n      name: strOrUnknown(osInfo.name ?? 'Unknown'),\n      releaseId: strOrUnknown(osInfo.releaseId ?? 'Unknown'),\n      timestamp: osInfo.timestamp ?? (antivirusInfo.timestamp ?? 0),\n    },\n    patches: {\n      missingPatchCount: patchInfo.missingPatchCount ?? missingPatches.length,\n      missingPatches: missingPatches,\n    },\n    vulnerabilities: {\n      critical: vulnInfo.criticalVulnerabilityCount ?? 0,\n      high: vulnInfo.highVulnerabilityCount ?? 0,\n      medium: vulnInfo.mediumVulnerabilityCount ?? 0,\n      low: vulnInfo.lowVulnerabilityCount ?? 0,\n      healthStatus: vulnInfo.healthStatus ?? 'UNKNOWN',\n      offline: vulnInfo.offline ?? null,\n    },\n  });\n}\n\nreturn combinedResults.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        368
+      ],
+      "id": "15d0cc93-f291-418e-a335-1e82c861c9b8",
+      "name": "Clean Output New"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1536,
+        368
+      ],
+      "id": "16830f66-bd2a-4a40-b0cc-db4ef9f4fbe4",
+      "name": "Merge1",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Robust collapse: flattens any array-shaped items too\nconst collected = [];\nfor (const item of items) {\n  const v = item.json;\n  if (Array.isArray(v)) collected.push(...v);\n  else collected.push(v);\n}\nreturn [{ json: { devices: collected, count: collected.length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        160
+      ],
+      "id": "545b002d-6e30-44aa-af6e-a40d7630851b",
+      "name": "Convert to a single Output"
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/v2/queries/operating-systems?df=org%3D{{ $json.organizationData.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        448
+      ],
+      "id": "8341db22-7851-4750-9720-4f3a356ac405",
+      "name": "OS Version2",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Static list of organizations with their IDs (mapped from NinjaOne)\nconst organizations = [\n  // Client name -> NinjaOne organization ID (pull IDs with the \"List NinjaOne Organizations\" node)\n  { \"name\": \"Contoso Ltd\", \"id\": 101 },\n  { \"name\": \"Fabrikam Inc\", \"id\": 102 },\n  { \"name\": \"Northwind Traders\", \"id\": 103 }\n];\n\n// Function to normalize strings for comparison\nfunction normalizeString(str) {\n  return str.trim().toLowerCase().replace(/\\s+/g, ' ');\n}\n\n// Get the target client name from input\nconst targetClientName = $input.first().json['Client Name'];\n\nif (!targetClientName) {\n  throw new Error(\"No 'Client Name' provided in input data. Please provide a client name in the 'Client Name' field.\");\n}\n\nconsole.log(`Looking for client: \"${targetClientName}\"`);\n\nlet foundOrganization = null;\nlet matchType = \"\";\n\n// 1. Exact match (case-insensitive)\nfoundOrganization = organizations.find(org =>\n  normalizeString(org.name) === normalizeString(targetClientName)\n);\nif (foundOrganization) matchType = \"exact\";\n\n// 2. Partial match - target contains org name\nif (!foundOrganization) {\n  foundOrganization = organizations.find(org =>\n    normalizeString(targetClientName).includes(normalizeString(org.name))\n  );\n  if (foundOrganization) matchType = \"partial_target_contains_org\";\n}\n\n// 3. Partial match - org name contains target\nif (!foundOrganization) {\n  foundOrganization = organizations.find(org =>\n    normalizeString(org.name).includes(normalizeString(targetClientName))\n  );\n  if (foundOrganization) matchType = \"partial_org_contains_target\";\n}\n\n// 4. Fuzzy match - 50%+ word overlap\nif (!foundOrganization) {\n  const targetWords = normalizeString(targetClientName).split(' ');\n  foundOrganization = organizations.find(org => {\n    const orgWords = normalizeString(org.name).split(' ');\n    const matchingWords = targetWords.filter(word =>\n      orgWords.some(orgWord => orgWord.includes(word) || word.includes(orgWord))\n    );\n    return matchingWords.length >= Math.ceil(targetWords.length * 0.5);\n  });\n  if (foundOrganization) matchType = \"fuzzy\";\n}\n\n// Not found - throw with suggestions\nif (!foundOrganization) {\n  const allClientNames = organizations.map(org => org.name).sort();\n  const suggestions = allClientNames.filter(name =>\n    normalizeString(name).includes(normalizeString(targetClientName.split(' ')[0]))\n  ).slice(0, 5);\n\n  throw new Error(\n    `Client \"${targetClientName}\" not found.\\n\\nAvailable clients:\\n${allClientNames.join('\\n')}\\n\\nDid you mean one of these?\\n${suggestions.join('\\n')}`\n  );\n}\n\nconsole.log(`Found: ${foundOrganization.name} (ID: ${foundOrganization.id}) - Match: ${matchType}`);\n\nreturn {\n  json: {\n    organizationId: foundOrganization.id,\n    organizationName: foundOrganization.name,\n    searchTerm: targetClientName,\n    matchType: matchType,\n    organizationData: foundOrganization,\n    searchResult: {\n      found: true,\n      searchTerm: targetClientName,\n      matchedName: foundOrganization.name,\n      matchType: matchType,\n      organizationId: foundOrganization.id\n    },\n    apiEndpoints: {\n      organizationDevices: `/v2/organization/${foundOrganization.id}/devices`,\n      organizationInfo: `/v2/organization/${foundOrganization.id}`,\n      organizationLocations: `/v2/organization/${foundOrganization.id}/locations`\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        352
+      ],
+      "id": "c5637218-13a2-4f89-a9b4-74e90e0bfbdb",
+      "name": "Convert To ID1"
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com{{ $('Convert To ID1').item.json.apiEndpoints.organizationDevices }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        160
+      ],
+      "id": "b8cfdaad-0199-40f2-abf3-6e664dba54aa",
+      "name": "Get Devices by ID1",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/v2/queries/antivirus-status?df=org%3D{{ $json.organizationData.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        304
+      ],
+      "id": "b72cc9a7-d0bd-4f30-938b-bf89afe60fa8",
+      "name": "Antivirus Status1",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://us2.ninjarmm.com/v2/organizations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        112,
+        928
+      ],
+      "id": "5313b17c-2b86-403f-998d-ebc85508664e",
+      "name": "List NinjaOne Organizations",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/v2/queries/os-patches?df=org%3D{{ $json.organizationData.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        912,
+        624
+      ],
+      "id": "dcf59103-6302-4a2d-b960-7fd26e58b8a9",
+      "name": "Patches",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Automated Alerts Section  -- this creates the section for use in the Main Report V2 workflow",
+        "height": 252,
+        "width": 1084,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        864,
+        1008
+      ],
+      "typeVersion": 1,
+      "id": "574b2463-e191-4d0a-a1d9-cc33ddfd9584",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Automated Alerts - Filter & Enrich\n// Filters to HaloPSA-webhook-linked conditions, joins device names, \n// builds client-friendly messages, sorts chronologically, formats dates for display\n\nconst ALLOWED_SOURCE_TYPES = [\n  'CONDITION_BITLOCKER_STATUS',\n  'CONDITION_WINDOWS_EVENT_LOG_TRIGGERED',\n  'CONDITION_AGENT_DISK_FREE_SPACE',\n];\n\n// Maps Ninja's internal message code -> a clean, client-facing sentence\nconst MESSAGE_BUILDERS = {\n  agent_win_cond_disk_volume_encryption_disabled: (p) =>\n    `BitLocker encryption is disabled on drive ${p.drive_letter}.`,\n  agent_win_cond_disk_free_le: (p) =>\n    `Free disk space on drive ${p.volume} is at or below ${p.threshold}${p.unit}.`,\n  agent_cond_eventlog2: (p) =>\n    `A ${p.event_source} error was logged on this device (Event ID ${p.event_id}): ${p.msg}`,\n};\n\nfunction formatAlertDate(epochSeconds) {\n  if (!epochSeconds) return 'Unknown';\n  const date = new Date(epochSeconds * 1000);\n  return date.toLocaleString('en-US', {\n    year: 'numeric', month: 'long', day: 'numeric',\n    hour: 'numeric', minute: '2-digit'\n  });\n}\n// Build deviceId -> deviceName lookup from the devices branch\nconst deviceNameMap = new Map();\ntry {\n  const deviceItems = $('Get Devices by ID1').all();\n  for (const it of deviceItems) {\n    const raw = it.json;\n    const list = Array.isArray(raw) ? raw\n      : Array.isArray(raw?.results) ? raw.results\n      : Array.isArray(raw?.devices) ? raw.devices\n      : [raw];\n    for (const d of list) {\n      if (!d) continue;\n      const id = d.id ?? d.deviceId;\n      const name = d.displayName ?? d.systemName ?? d.dnsName ?? d.deviceName;\n      if (id !== undefined && name) deviceNameMap.set(id, name);\n    }\n  }\n} catch (e) {\n  // Get Devices by ID1 not available in this execution context\n}\n\nconst incoming = $input.all();\nlet alerts = [];\n\nfor (const item of incoming) {\n  const j = item.json;\n  if (Array.isArray(j?.results)) alerts.push(...j.results);\n  else if (Array.isArray(j)) alerts.push(...j);\n  else if (j) alerts.push(j);\n}\n\nconst filtered = alerts.filter(a => ALLOWED_SOURCE_TYPES.includes(a.sourceType));\n\n// Enrich, keeping raw timestamp temporarily for sorting\nconst enriched = filtered.map(a => {\n  const code = a?.data?.message?.code;\n  const params = a?.data?.message?.params || {};\n  const builder = MESSAGE_BUILDERS[code];\n\n  return {\n    deviceId: a.deviceId,\n    deviceName: deviceNameMap.get(a.deviceId) ?? `Device ${a.deviceId}`,\n    sourceType: a.sourceType,\n    clientMessage: builder ? builder(params) : a.conditionName,\n    _sortTime: a.createTime, // internal only, stripped before output\n    dateDetected: formatAlertDate(a.createTime),\n  };\n});\n\n// Sort oldest -> newest by raw timestamp\nenriched.sort((x, y) => x._sortTime - y._sortTime);\n\n// Strip internal sort field before returning to the report\nreturn enriched.map(({ _sortTime, ...rest }) => ({ json: rest }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        1088
+      ],
+      "id": "82de353e-518e-4ba2-8fb1-1cb003290746",
+      "name": "Automated Alerts - Filter & Enrich1"
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/v2/alerts?df=org={{ $json.organizationData.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        944,
+        1072
+      ],
+      "id": "dee38d69-0895-4789-bb15-feff8dba940e",
+      "name": "Automated Alerts - Get Alerts",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Automated Alerts - Structure by Device\n// Groups the enriched alert list by device for report rendering\n\nconst items = $input.all();\n\nconst deviceMap = new Map();\n\nfor (const item of items) {\n  const a = item.json;\n  const key = a.deviceId;\n\n  if (!deviceMap.has(key)) {\n    deviceMap.set(key, {\n      deviceId: a.deviceId,\n      deviceName: a.deviceName,\n      alertCount: 0,\n      alerts: [],\n    });\n  }\n\n  const entry = deviceMap.get(key);\n  entry.alertCount += 1;\n  entry.alerts.push({\n    clientMessage: a.clientMessage,\n    dateDetected: a.dateDetected,\n  });\n}\n\n// Alphabetical by device name for predictable report ordering\nconst devices = Array.from(deviceMap.values())\n  .sort((x, y) => x.deviceName.localeCompare(y.deviceName));\n\nconst totalActiveAlerts = devices.reduce((sum, d) => sum + d.alertCount, 0);\n\nreturn [{\n  json: {\n    type: 'automated_alerts_summary',\n    processedAt: new Date().toISOString(),\n    devicesWithAlerts: devices.length,\n    totalActiveAlerts,\n    devices,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        1088
+      ],
+      "id": "dfcdc10c-3502-4957-a5a8-41bb1ef76ad9",
+      "name": "Automated Alerts - Structure by Device"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2160,
+        784
+      ],
+      "id": "b129380a-4bec-4913-947f-95a0a47a5cd9",
+      "name": "Combine Subworkflow Outputs"
+    },
+    {
+      "parameters": {
+        "url": "=https://us2.ninjarmm.com/v2/queries/device-health?df=org%3D{{ $json.organizationData.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        912,
+        784
+      ],
+      "id": "837f7cc3-0907-4a4b-9c8d-e0a62c93be44",
+      "name": "Get Device Health",
+      "credentials": {
+        "oAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "NinjaOne OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node — Mode: \"Run Once for All Items\"\n// Groups patch results by deviceId, excluding REJECTED patches.\n\nconst allPatches = [];\n\nfor (const item of $input.all()) {\n  const json = item.json;\n\n  if (Array.isArray(json?.results)) {\n    allPatches.push(...json.results);\n  } else if (json && json.id && json.deviceId !== undefined) {\n    allPatches.push(json);\n  } else if (Array.isArray(json)) {\n    allPatches.push(...json);\n  }\n}\n\n// Filter out REJECTED patches\nconst pendingPatches = allPatches.filter(\n  (p) => (p.status || \"\").toUpperCase() !== \"REJECTED\"\n);\n\nconst byDevice = {};\n\nfor (const p of pendingPatches) {\n  const key = String(p.deviceId);\n  if (!byDevice[key]) {\n    byDevice[key] = {\n      deviceId: p.deviceId,\n      patchCount: 0,\n      patches: [],\n      severityBreakdown: {\n        IMPORTANT: 0,\n        OPTIONAL: 0,\n        CRITICAL: 0,\n        OTHER: 0,\n      },\n      typeBreakdown: {},\n      lastSeen: 0,\n    };\n  }\n\n  const entry = byDevice[key];\n\n  const dedupeKey = `${p.id}|${p.name}|${p.timestamp}`;\n  const exists = entry.patches.some(\n    (x) => `${x.id}|${x.name}|${x.timestamp}` === dedupeKey\n  );\n  if (exists) continue;\n\n  const patch = {\n    id: p.id,\n    name: p.name,\n    severity: p.severity ?? null,\n    status: p.status ?? null,\n    type: p.type ?? null,\n    kbNumber: p.kbNumber ?? null,\n    timestamp: p.timestamp ?? null,\n  };\n  entry.patches.push(patch);\n  entry.patchCount += 1;\n\n  const sev = (p.severity || \"OTHER\").toUpperCase();\n  if (entry.severityBreakdown[sev] !== undefined) {\n    entry.severityBreakdown[sev] += 1;\n  } else {\n    entry.severityBreakdown.OTHER += 1;\n  }\n\n  const t = p.type || \"UNKNOWN\";\n  entry.typeBreakdown[t] = (entry.typeBreakdown[t] || 0) + 1;\n\n  if (p.timestamp && p.timestamp > entry.lastSeen) {\n    entry.lastSeen = p.timestamp;\n  }\n}\n\nconst severityRank = { CRITICAL: 0, IMPORTANT: 1, OPTIONAL: 2 };\nconst sortPatches = (a, b) => {\n  const ra = severityRank[a.severity] ?? 9;\n  const rb = severityRank[b.severity] ?? 9;\n  if (ra !== rb) return ra - rb;\n  return (a.name || \"\").localeCompare(b.name || \"\");\n};\n\nconst output = Object.values(byDevice)\n  .map((d) => {\n    d.patches.sort(sortPatches);\n    return d;\n  })\n  .sort((a, b) => a.deviceId - b.deviceId);\n\nreturn output.map((d) => ({ json: d }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        624
+      ],
+      "id": "18c0a26c-e182-4978-873a-589c5f26b6b3",
+      "name": "Group Patches by DeviceID"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node — Mode: \"Run Once for All Items\"\n// Summarizes per-device patch data into deviceId + missing patch names.\n\nconst items = $input.all();\n\nconst summary = items.map((item) => {\n  const d = item.json;\n\n  return {\n    json: {\n      deviceId: d.deviceId,\n      missingPatches: (d.patches || []).map((p) => p.name),\n    },\n  };\n});\n\n// Sort by deviceId ascending\nsummary.sort((a, b) => a.json.deviceId - b.json.deviceId);\n\nreturn summary;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        624
+      ],
+      "id": "35a27e90-2081-4a6f-961f-0937c39edd81",
+      "name": "Summarize Patch Data"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Convert To ID1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Output New": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Clean Output New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to a single Output": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OS Version2": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Convert To ID1": {
+      "main": [
+        [
+          {
+            "node": "Get Devices by ID1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OS Version2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Antivirus Status1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Patches",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Automated Alerts - Get Alerts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Device Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Devices by ID1": {
+      "main": [
+        [
+          {
+            "node": "Convert to a single Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Antivirus Status1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Patches": {
+      "main": [
+        [
+          {
+            "node": "Group Patches by DeviceID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Automated Alerts - Filter & Enrich1": {
+      "main": [
+        [
+          {
+            "node": "Automated Alerts - Structure by Device",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Automated Alerts - Get Alerts": {
+      "main": [
+        [
+          {
+            "node": "Automated Alerts - Filter & Enrich1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Combine Subworkflow Outputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Automated Alerts - Structure by Device": {
+      "main": [
+        [
+          {
+            "node": "Combine Subworkflow Outputs",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Device Health": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Group Patches by DeviceID": {
+      "main": [
+        [
+          {
+            "node": "Summarize Patch Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Patch Data": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "List NinjaOne Organizations": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}
