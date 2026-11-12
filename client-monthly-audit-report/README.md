@@ -62,9 +62,10 @@ Each section subworkflow takes a `Client Name` and resolves it to that platform'
 ## Design notes
 
 - **Normalization at the edges.** Every vendor section collapses its API responses into one summary item. Merge logic downstream is simple and source-agnostic.
+**Staggered Executions for Low-Cost API Calls.** The monthly schedule is set to run one group on the 14th and a second group on the 15th. The free CustomJS API allows ~20 calls per-day. Upgraded plan can be increased to support quantities greater than ~40 reports in a 2-day period. 
 - **Lean AI payload.** The "Build AI payload" step ranks findings into `attentionItems` (high / medium / low) and caps long lists before the LLM sees anything. That keeps token use low and the output consistent. The system prompt enforces a fixed 3-paragraph structure and requires every claim to have a supporting figure.
 - **PII masking.** User emails are partially masked (`jo***oe@contoso.com`) before data leaves the CIPP section.
-- **Bilingual output.** The HTML template supports English and French per client.
+- **Bilingual output.** The HTML template supports multiple languages.
 - **Graceful gaps.** Clients without a given product (no Acronis tenant, no Intune license) get a "not applicable" result instead of a failed run.
 
 ## Setup
@@ -106,4 +107,4 @@ Each section subworkflow takes a `Client Name` and resolves it to that platform'
 
 ## Tech
 
-n8n (Code, HTTP Request, Execute Workflow, Data Table, LangChain Agent nodes) · JavaScript · Microsoft Graph via CIPP · NinjaOne API v2 · ThreatLocker Portal API · Acronis Cyber Protect Cloud API · DropSuite API · RDAP · OpenAI · HTML/CSS to PDF
+n8n (Code, HTTP Request, Execute Workflow, Data Table, LangChain Agent nodes) · JavaScript · Microsoft Graph via CIPP · NinjaOne API · ThreatLocker Portal API · Acronis Cyber Protect Cloud API · DropSuite API · RDAP · OpenAI · CustomJS
